@@ -17,7 +17,7 @@ Welcome → Discovery conversation → Reflection → Evidence → Pattern → S
 - Structured observation extraction
 - Evidence tied to athlete statements
 - One highest-leverage working pattern
-- Three shared priorities
+- One shared priority and up to three focus areas
 
 ## Explicitly out of scope
 

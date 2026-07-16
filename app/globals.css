@@ -31,13 +31,46 @@ h1 { margin: 0 0 28px; font-family: Georgia, "Times New Roman", serif; font-size
 .message > span { display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
 .message p { margin: 0; white-space: pre-wrap; font-size: 18px; line-height: 1.65; }
 .message.user { margin-left: 12%; padding: 20px 22px; background: var(--soft); border-radius: 22px; }
+.welcome-draft { margin: 8px 0 28px; margin-left: 0; }
 .reflecting { color: var(--muted); font-size: 14px; animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
 .composer { position: sticky; bottom: 0; width: min(820px, calc(100% - 28px)); margin: 0 auto 18px; padding: 14px; border: 1px solid #dfe2db; border-radius: 24px; background: rgba(255,255,255,.96); box-shadow: 0 18px 55px rgba(38,60,45,.1); }
+.welcome-composer { position: relative; width: 100%; margin: 0; }
 .composer textarea { width: 100%; resize: none; border: 0; outline: 0; padding: 10px; color: var(--ink); background: transparent; font-size: 17px; }
 .composer-actions { display: flex; justify-content: space-between; gap: 12px; }
 .composer small { display: block; margin: 8px 8px 0; color: var(--muted); }
+.generating-card { text-align: left; }
+.generating-copy {
+  margin: 12px 0 0;
+  font-size: 22px;
+  line-height: 1.55;
+  color: var(--ink);
+  font-weight: 500;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.shared-priority {
+  margin: 28px 0 8px;
+  max-width: 700px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(28px, 4.5vw, 40px);
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.everything-else { margin-top: 8px; margin-bottom: 28px; font-weight: 600; color: var(--ink) !important; }
+.inline-error {
+  margin: 24px 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--soft);
+}
+.inline-error p { margin: 0 0 12px; color: #42453f; line-height: 1.5; }
+.error-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.generating-card .secondary { margin-top: 28px; }
 .reflection-card { padding: 44px 0; }
+.reflection-card .primary { margin-top: 8px; }
 .observation-list { margin: 38px 0 48px; }
 .observation-list p { padding: 16px 0; border-bottom: 1px solid var(--line); font-size: 19px; line-height: 1.5; }
 .evidence-grid { display: grid; gap: 14px; margin: 34px 0; }
@@ -52,7 +85,8 @@ h1 { margin: 0 0 28px; font-family: Georgia, "Times New Roman", serif; font-size
 @media (max-width: 620px) {
   .welcome-shell, .reflection-shell { align-items: start; padding: 44px 22px; }
   h1 { font-size: 46px; }
-  .welcome-card > p, .intro-copy, .pattern-copy { font-size: 18px; }
+  .welcome-card > p, .intro-copy, .pattern-copy, .generating-copy { font-size: 18px; }
+  .shared-priority { font-size: 28px; }
   .topbar { padding: 16px 18px; }
   .thread { padding: 36px 18px 150px; }
   .message.user { margin-left: 0; }

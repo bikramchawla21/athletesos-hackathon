@@ -2,67 +2,119 @@
 
 **The intelligence that grows with you.**
 
-AthleteOS is a hackathon MVP for a new category: the **Performance Operating System**. It conducts an adaptive discovery conversation, develops a working understanding of the athlete, and turns that understanding into an evidence-backed performance priority.
+AthleteOS is a hackathon MVP of a **Performance Operating System**. It runs a typing-first discovery conversation, builds a working understanding of an athlete, and turns that understanding into an evidence-backed reflection: observations, evidence, a working pattern, and a shared priority.
 
-## What this scaffold proves
+## What this MVP proves
 
-1. A calm, typing-first discovery conversation.
-2. Variable follow-up questions generated from the athlete's latest input and full conversation context.
-3. Reflection before recommendation.
-4. A structured insight loop:
-   - Today, here's what I noticed
-   - Here's what led me to that thought
-   - The strongest pattern I see
-   - What should we focus on?
-5. A fallback demo mode when no API key is configured.
+1. A calm, white, spacious welcome and discovery conversation.
+2. Adaptive follow-ups via `/api/chat` (OpenAI), with deterministic **demo mode** when no API key is set.
+3. Reflection before recommendation — no premature coaching plan.
+4. Structured insight loop rendered on locked screens:
+   - Today, here’s what I noticed.
+   - Here’s what led me to that thought.
+   - The strongest pattern I see.
+   - If we worked on only one thing together…
+5. Honest failures when an API key is configured (no silent fake “live” success).
+6. Basic crisis-safe replies that refuse to act as a therapist, doctor, or emergency service.
 
 ## Tech stack
 
-- Next.js App Router
-- TypeScript
+- Next.js App Router (v16) + React 19 + TypeScript
 - OpenAI Responses API
-- Structured Outputs for the insight report
+- Zod validation / structured JSON for reflection reports
 - Vercel-ready deployment
 
-## Run locally
+## Local setup
 
 ```bash
 npm install
 cp .env.example .env.local
-# Add your OpenAI API key to .env.local
+# Optional: set a real OPENAI_API_KEY in .env.local
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open [http://localhost:3000](http://localhost:3000).
 
 ## Environment variables
 
+Copy from [`.env.example`](.env.example):
+
 ```env
 OPENAI_API_KEY=replace_me
-OPENAI_MODEL=gpt-5.6-luna
+OPENAI_MODEL=gpt-4.1
 ```
 
-The application still runs without an API key using deterministic demo responses, but variable follow-up prompts require a valid key.
+| Variable | Required | Notes |
+|----------|----------|--------|
+| `OPENAI_API_KEY` | No for demo | If missing or set to `replace_me`, chat and insights run in **demo mode**. |
+| `OPENAI_MODEL` | No | Defaults to `gpt-4.1`. |
 
-## How adaptive follow-ups work
+`.env`, `.env.local`, and `.env*.local` are gitignored. Never commit secrets.
 
-The browser sends the full conversation to `/api/chat`. The model is instructed to:
+## Demo fallback behavior
 
-- reflect a meaningful detail,
-- ask one question at a time,
-- follow the athlete's threads rather than a fixed questionnaire,
-- check and correct its understanding,
-- avoid generic coaching advice.
+When there is **no usable API key**:
 
-When the athlete selects **Share what you've noticed**, `/api/insights` converts the conversation into a structured reflection report.
+- `/api/chat` returns a deterministic, input-aware demo reply with `demoMode: true`.
+- `/api/insights` returns a schema-valid demo `ReflectionReport` with `demoMode: true` (only if the transcript has enough athlete signal).
 
-## Deploy
+When a **real API key is configured** and the provider fails (timeout, invalid output after one repair, network error):
 
-1. Push this folder to a GitHub repository.
-2. Import the repository into Vercel.
-3. Add `OPENAI_API_KEY` and optionally `OPENAI_MODEL` in Vercel project settings.
-4. Deploy.
+- The API returns an error (`502` / validation as appropriate).
+- The UI shows the error and a **Retry** control.
+- Demo content is **not** silently substituted as a live success.
+
+## API behavior
+
+### `POST /api/chat`
+
+Body: `{ "messages": [{ "role": "user" | "assistant", "content": string }, ...] }`
+
+- Validates the request; rejects empty user content.
+- Crisis / self-harm heuristics return a fixed safe reply (no model call).
+- Otherwise: OpenAI discovery reply, or demo reply without a key.
+- Success: `{ "reply": string, "demoMode": boolean, "safety"?: boolean }`
+
+### `POST /api/insights`
+
+Body: same message transcript shape (minimum length enforced).
+
+- Requires enough athlete context (≥3 user turns and enough text); otherwise `422` `insufficient_context`.
+- Builds a `ReflectionReport` (observations, evidence, pattern, shared priority, focus areas, closing).
+- Validates model JSON with Zod; repairs once on schema failure.
+- Success: `{ "report": ReflectionReport, "demoMode": boolean }`
+
+## Scripts
+
+```bash
+npm run dev          # local development
+npm run build        # production build
+npm run start        # serve production build
+npm run lint         # ESLint
+npm run typecheck    # TypeScript
+npm test             # insights + hardening tests
+npm run test:insights
+npm run test:hardening
+```
+
+## Deploy to Vercel
+
+1. Push this repository to GitHub (already: `bikramchawla21/athletesos-hackathon`).
+2. Import the repo in [Vercel](https://vercel.com/new).
+3. Framework preset: Next.js (default).
+4. Add environment variables: `OPENAI_API_KEY` (recommended for live demos), optional `OPENAI_MODEL`.
+5. Deploy.
+
+CLI alternative (if Vercel CLI is installed and authenticated):
+
+```bash
+npx vercel --prod
+```
+
+## Product loop (judge path)
+
+Welcome → discovery conversation → **Share what you’ve noticed** → generating → four reflection screens → **Let’s begin** → completion → **Start over** (clears conversation and report).
 
 ## Safety and scope
 
-This prototype does not provide medical diagnosis, injury clearance, mental-health treatment, or emergency guidance. It is a performance reflection and decision-support experience.
+AthleteOS is **not** medical care, therapy, diagnosis, injury clearance, or emergency guidance. Crisis-related messages receive a short safety redirect toward human / emergency help. Out of scope for this MVP: auth, voice, wearables, coach accounts, dashboards, payments, long-term database memory.
