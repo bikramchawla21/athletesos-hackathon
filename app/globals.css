@@ -69,6 +69,60 @@ h1 { margin: 0 0 28px; font-family: Georgia, "Times New Roman", serif; font-size
 .inline-error p { margin: 0 0 12px; color: #42453f; line-height: 1.5; }
 .error-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .generating-card .secondary { margin-top: 28px; }
+.complete-card .complete-title {
+  margin: 0 0 20px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(32px, 5.5vw, 52px);
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -.02em;
+}
+.relationship-marker {
+  margin: 0 0 36px;
+  max-width: 560px;
+  font-size: 18px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.complete-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(8px);
+}
+.confirm-card {
+  width: min(440px, 100%);
+  padding: 28px 26px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgba(38, 60, 45, 0.1);
+}
+.confirm-copy {
+  margin: 0 0 22px;
+  font-size: 17px;
+  line-height: 1.55;
+  color: #42453f;
+}
+.confirm-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.confirm-actions .primary,
+.confirm-actions .secondary {
+  width: 100%;
+}
 .reflection-card { padding: 44px 0; }
 .reflection-card .primary { margin-top: 8px; }
 .observation-list { margin: 38px 0 48px; }
@@ -86,6 +140,7 @@ h1 { margin: 0 0 28px; font-family: Georgia, "Times New Roman", serif; font-size
   .welcome-shell, .reflection-shell { align-items: start; padding: 44px 22px; }
   h1 { font-size: 46px; }
   .welcome-card > p, .intro-copy, .pattern-copy, .generating-copy { font-size: 18px; }
+  .complete-card .complete-title { font-size: 34px; }
   .shared-priority { font-size: 28px; }
   .topbar { padding: 16px 18px; }
   .thread { padding: 36px 18px 150px; }

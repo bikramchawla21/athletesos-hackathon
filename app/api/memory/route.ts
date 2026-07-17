@@ -6,25 +6,29 @@ import {
   logValidationFailure,
   validationErrorBody,
 } from "@/lib/api-errors.mjs";
-import { generateInsights } from "@/lib/insights.mjs";
-import { parseInsightsRequest } from "@/lib/request-contract.mjs";
+import { generateMemoryUpdate } from "@/lib/memory.mjs";
+import { parseMemoryRequest } from "@/lib/request-contract.mjs";
 
 export async function POST(request: Request) {
   let json: unknown;
   try {
     json = await request.json();
-    const body = parseInsightsRequest(json);
-    const result = await generateInsights(body.messages, { memory: body.memory });
-
+    const body = parseMemoryRequest(json);
+    const result = await generateMemoryUpdate({
+      memory: body.memory,
+      messages: body.messages,
+      report: body.report ?? null,
+      reason: body.reason,
+    });
     return NextResponse.json(result.body, { status: result.status });
   } catch (error) {
     if (error instanceof ZodError || error instanceof SyntaxError) {
       const issues = error instanceof ZodError ? formatZodIssues(error) : [];
-      logValidationFailure("/api/insights", "request_validation", issues, json);
+      logValidationFailure("/api/memory", "request_validation", issues, json);
       return NextResponse.json(
         validationErrorBody({
-          code: ERROR_CODES.INVALID_INSIGHTS_REQUEST,
-          message: "The insights request did not match the expected schema.",
+          code: ERROR_CODES.INVALID_MEMORY_REQUEST,
+          message: "The memory request did not match the expected schema.",
           issues,
           keys:
             json && typeof json === "object" && !Array.isArray(json)
@@ -38,8 +42,8 @@ export async function POST(request: Request) {
     console.error(error);
     return NextResponse.json(
       {
-        error: "Unexpected insights error.",
-        message: "Unexpected insights error.",
+        error: "Unexpected memory error.",
+        message: "Unexpected memory error.",
         code: ERROR_CODES.UNKNOWN,
       },
       { status: 500 },

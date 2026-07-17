@@ -196,7 +196,7 @@ describe("generateInsights", () => {
     assert.equal(result.ok, false);
     if (result.ok) return;
     assert.equal(result.status, 502);
-    assert.equal(result.body.code, "upstream");
+    assert.equal(result.body.code, "INVALID_INSIGHTS_RESPONSE");
   });
 });
 
@@ -212,6 +212,6 @@ describe("insight prompt safeguards", () => {
     const routePath = join(__dirname, "../app/api/insights/route.ts");
     const source = readFileSync(routePath, "utf8");
     assert.match(source, /generateInsights/);
-    assert.match(source, /insightsRequestSchema/);
+    assert.match(source, /parseInsightsRequest/);
   });
 });

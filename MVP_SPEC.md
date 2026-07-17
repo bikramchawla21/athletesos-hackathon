@@ -22,12 +22,16 @@ Welcome → Discovery conversation → Reflection → Evidence → Pattern → S
 ## Explicitly out of scope
 
 - Voice input
-- Authentication
+- Authentication / user accounts
 - Wearables
 - Video analysis
 - Coach dashboard
 - Payments
-- Long-term database memory
+- Cloud persistence, vector databases, embeddings, knowledge-graph visualization
+- Notifications, calendar plans, analytics, gamification
+- Separate AI agents
+- Visible confidence scores / percentages
+- Long-term database memory (anonymous same-browser `localStorage` is in scope for the demo)
 - Medical or psychological diagnosis
 
 ## Success criterion

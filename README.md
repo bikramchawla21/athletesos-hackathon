@@ -16,6 +16,7 @@ AthleteOS is a hackathon MVP of a **Performance Operating System**. It runs a ty
    - If we worked on only one thing together…
 5. Honest failures when an API key is configured (no silent fake “live” success).
 6. Basic crisis-safe replies that refuse to act as a therapist, doctor, or emergency service.
+7. Structured athlete memory with anonymous same-browser persistence (`localStorage`), updated at controlled checkpoints via `/api/memory`.
 
 ## Tech stack
 
@@ -57,6 +58,7 @@ When there is **no usable API key**:
 
 - `/api/chat` returns a deterministic, input-aware demo reply with `demoMode: true`.
 - `/api/insights` returns a schema-valid demo `ReflectionReport` with `demoMode: true` (only if the transcript has enough athlete signal).
+- `/api/memory` returns a schema-valid demo `AthleteMemory` update with `demoMode: true`.
 
 When a **real API key is configured** and the provider fails (timeout, invalid output after one repair, network error):
 
@@ -68,11 +70,14 @@ When a **real API key is configured** and the provider fails (timeout, invalid o
 
 ### `POST /api/chat`
 
-Body: `{ "messages": [{ "role": "user" | "assistant", "content": string }, ...] }`
+Body: `{ "messages": Message[], "memory"?: AthleteMemory | null, "report"?: ReflectionReport | null, "mode"?: "chat" | "reopen" }`
 
-- Validates the request; rejects empty user content.
+- Validates the request; rejects empty user content in normal chat mode.
+- `mode: "reopen"` generates a short context-aware continuation from memory + latest priority (no new user turn required).
+- Optional validated `memory` informs natural references and hidden coverage routing (never shown as percentages).
 - Crisis / self-harm heuristics return a fixed safe reply (no model call).
 - Otherwise: OpenAI discovery reply, or demo reply without a key.
+- When a real API key is configured, provider failures return `502` — never a silent demo success.
 - Success: `{ "reply": string, "demoMode": boolean, "safety"?: boolean }`
 
 ### `POST /api/insights`
@@ -84,6 +89,14 @@ Body: same message transcript shape (minimum length enforced).
 - Validates model JSON with Zod; repairs once on schema failure.
 - Success: `{ "report": ReflectionReport, "demoMode": boolean }`
 
+### `POST /api/memory`
+
+Body: `{ "memory": AthleteMemory, "messages": Message[], "report"?: ReflectionReport | null, "reason": "checkpoint" | "pre_insights" | "correction" | "session_complete" }`
+
+- Merges grounded updates into structured athlete memory (claims must cite message ids).
+- Validates with Zod; repairs once on schema failure; strips unknown message-id citations.
+- Success: `{ "memory": AthleteMemory, "demoMode": boolean }`
+
 ## Scripts
 
 ```bash
@@ -92,9 +105,10 @@ npm run build        # production build
 npm run start        # serve production build
 npm run lint         # ESLint
 npm run typecheck    # TypeScript
-npm test             # insights + hardening tests
+npm test             # insights + hardening + memory tests
 npm run test:insights
 npm run test:hardening
+npm run test:memory
 ```
 
 ## Deploy to Vercel
@@ -113,8 +127,12 @@ npx vercel --prod
 
 ## Product loop (judge path)
 
-Welcome → discovery conversation → **Share what you’ve noticed** → generating → four reflection screens → **Let’s begin** → completion → **Start over** (clears conversation and report).
+Welcome → discovery conversation → **Share what you’ve noticed** → generating → four reflection screens → **Let’s begin** → completion (“Thank you for trusting me…”) → **Continue our conversation** (preserves transcript/memory/report + reopen message) or **Start over** (confirm, then clear all AthleteOS browser state).
+
+Anonymous same-browser persistence uses `localStorage` key `athletesos:v1` (messages, AthleteMemory, latest reflection, UI stage, relationship stage, session count). No API keys are stored in the browser.
 
 ## Safety and scope
 
-AthleteOS is **not** medical care, therapy, diagnosis, injury clearance, or emergency guidance. Crisis-related messages receive a short safety redirect toward human / emergency help. Out of scope for this MVP: auth, voice, wearables, coach accounts, dashboards, payments, long-term database memory.
+AthleteOS is **not** medical care, therapy, diagnosis, injury clearance, or emergency guidance. Crisis-related messages receive a short safety redirect toward human / emergency help.
+
+Out of scope for this MVP: user accounts, cloud persistence, vector databases, embeddings, knowledge-graph visualization, coach dashboard, wearables, voice, notifications, calendar plans, analytics, gamification, separate AI agents, visible confidence scores, long-term database memory (browser `localStorage` only).

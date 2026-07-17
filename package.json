@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test:insights": "node --test scripts/test-insights.mjs",
     "test:hardening": "node --test scripts/test-hardening.mjs",
-    "test": "npm run test:insights && npm run test:hardening"
+    "test:memory": "node --test scripts/test-memory.mjs",
+    "test": "npm run test:insights && npm run test:hardening && npm run test:memory"
   },
   "dependencies": {
     "next": "16.2.10",

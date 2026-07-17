@@ -1,46 +1,64 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  normalizeAthleteMemory,
+  normalizeConversationMessages,
+} from "@/lib/request-contract.mjs";
+import {
+  looksLikeAthleteCorrection,
+  nextRelationshipStage,
+  shouldSyncMemoryCheckpoint,
+} from "@/lib/memory-guards.mjs";
+import { createEmptyAthleteMemory } from "@/lib/memory.mjs";
+import { OPENING_MESSAGE_ID, createMessageId } from "@/lib/message-id.mjs";
+import {
+  PERSISTED_STATE_VERSION,
+  clearAthleteOsStorage,
+  loadPersistedState,
+  savePersistedState,
+} from "@/lib/persistence.mjs";
 import { canSendMessage, shouldApplyInsightsResult } from "@/lib/ui-guards.mjs";
-import type { Message, ReflectionReport } from "@/lib/types";
-
-type Stage =
-  | "welcome"
-  | "conversation"
-  | "generating"
-  | "observations"
-  | "evidence"
-  | "pattern"
-  | "focus"
-  | "complete";
+import { relationshipMarkerCopy } from "@/lib/chat.mjs";
+import type { AppStage, AthleteMemory, Message, ReflectionReport } from "@/lib/types";
 
 type PendingRetry =
   | { kind: "chat"; messages: Message[] }
   | { kind: "insights"; messages: Message[] }
+  | { kind: "reopen" }
   | null;
 
 const openingMessage: Message = {
+  id: OPENING_MESSAGE_ID,
   role: "assistant",
   content:
     "Hi.\nI’m AthleteOS.\n\nI’m looking forward to getting to know you.\n\nThe better I understand your journey, the better we’ll think through your performance together.\n\nWhenever you’re ready, I’m listening.",
 };
 
 const CLIENT_TIMEOUT_MS = 30_000;
+const PERSIST_DEBOUNCE_MS = 300;
 
 export default function DiscoveryApp() {
-  const [stage, setStage] = useState<Stage>("welcome");
+  const [hydrated, setHydrated] = useState(false);
+  const [stage, setStage] = useState<AppStage>("welcome");
   const [messages, setMessages] = useState<Message[]>([openingMessage]);
+  const [memory, setMemory] = useState<AthleteMemory>(() => createEmptyAthleteMemory());
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<ReflectionReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [pendingRetry, setPendingRetry] = useState<PendingRetry>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
   const insightsAbortRef = useRef<AbortController | null>(null);
+  const memoryAbortRef = useRef<AbortController | null>(null);
   const insightsRequestIdRef = useRef(0);
-  const stageRef = useRef<Stage>("welcome");
+  const stageRef = useRef<AppStage>("welcome");
+  const memoryRef = useRef(memory);
+  const lastSyncedUserTurnCountRef = useRef(0);
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const athleteTurns = useMemo(
     () => messages.filter((message) => message.role === "user").length,
@@ -52,6 +70,49 @@ export default function DiscoveryApp() {
   }, [stage]);
 
   useEffect(() => {
+    memoryRef.current = memory;
+  }, [memory]);
+
+  useEffect(() => {
+    // Hydrate from localStorage after mount (SSR-safe); defer to avoid sync setState-in-effect lint.
+    const snapshot = loadPersistedState();
+    queueMicrotask(() => {
+      if (snapshot) {
+        const restoredStage =
+          snapshot.stage === "generating" ? "conversation" : snapshot.stage;
+        setStage(restoredStage);
+        setMessages(snapshot.messages.length > 0 ? snapshot.messages : [openingMessage]);
+        setMemory(snapshot.memory);
+        setReport(snapshot.report);
+        setDemoMode(snapshot.demoMode);
+        lastSyncedUserTurnCountRef.current = snapshot.messages.filter(
+          (m) => m.role === "user",
+        ).length;
+      }
+      setHydrated(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(() => {
+      savePersistedState({
+        version: PERSISTED_STATE_VERSION,
+        savedAt: new Date().toISOString(),
+        stage,
+        messages,
+        memory,
+        report,
+        demoMode,
+      });
+    }, PERSIST_DEBOUNCE_MS);
+    return () => {
+      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    };
+  }, [hydrated, stage, messages, memory, report, demoMode]);
+
+  useEffect(() => {
     if (stage === "conversation") {
       threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
@@ -60,21 +121,105 @@ export default function DiscoveryApp() {
   function abortInFlight() {
     chatAbortRef.current?.abort();
     insightsAbortRef.current?.abort();
+    memoryAbortRef.current?.abort();
     chatAbortRef.current = null;
     insightsAbortRef.current = null;
+    memoryAbortRef.current = null;
     insightsRequestIdRef.current += 1;
   }
 
   function resetAll() {
     abortInFlight();
+    clearAthleteOsStorage();
+    const empty = createEmptyAthleteMemory();
+    lastSyncedUserTurnCountRef.current = 0;
+    setConfirmReset(false);
     setStage("welcome");
     setMessages([openingMessage]);
+    setMemory(empty);
     setInput("");
     setLoading(false);
     setReport(null);
     setError(null);
     setDemoMode(false);
     setPendingRetry(null);
+  }
+
+  function requestStartOver() {
+    setConfirmReset(true);
+  }
+
+  function resolvedMemory(candidate: AthleteMemory = memoryRef.current): AthleteMemory {
+    const result = normalizeAthleteMemory(candidate, { allowEmptyFallback: true });
+    if (!result.ok) return createEmptyAthleteMemory();
+    if (result.migrationFailed) {
+      console.warn("Athlete memory repaired/reset before request", result.warnings?.slice(0, 6));
+    }
+    return result.memory;
+  }
+
+  function buildChatPayload(transcript: Message[], extra: Record<string, unknown> = {}) {
+    return {
+      messages: normalizeConversationMessages(transcript),
+      memory: resolvedMemory(),
+      ...extra,
+    };
+  }
+
+  function buildInsightsPayload(transcript: Message[], memoryForInsights: AthleteMemory) {
+    return {
+      messages: normalizeConversationMessages(transcript),
+      memory: resolvedMemory(memoryForInsights),
+    };
+  }
+
+  async function updateMemory(
+    reason: "checkpoint" | "pre_insights" | "correction" | "session_complete",
+    transcript: Message[] = messages,
+    currentReport: ReflectionReport | null = report,
+    baseMemory: AthleteMemory = memoryRef.current,
+  ): Promise<AthleteMemory | null> {
+    memoryAbortRef.current?.abort();
+    const controller = new AbortController();
+    memoryAbortRef.current = controller;
+    const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+
+    try {
+      const response = await fetch("/api/memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          memory: resolvedMemory(baseMemory),
+          messages: normalizeConversationMessages(transcript),
+          report: currentReport,
+          reason,
+        }),
+        signal: controller.signal,
+      });
+      const data = await response.json();
+      if (!response.ok || !data.memory) {
+        return null;
+      }
+      if (data.demoMode) setDemoMode(true);
+      const parsed = normalizeAthleteMemory(data.memory, { allowEmptyFallback: true });
+      if (!parsed.ok) {
+        console.warn("Dropped invalid memory payload from /api/memory", parsed.issues);
+        return null;
+      }
+      const nextMemory = parsed.memory;
+      setMemory(nextMemory);
+      memoryRef.current = nextMemory;
+      lastSyncedUserTurnCountRef.current = transcript.filter((m) => m.role === "user").length;
+      return nextMemory;
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return null;
+      return null;
+    } finally {
+      clearTimeout(timer);
+      if (memoryAbortRef.current === controller) {
+        memoryAbortRef.current = null;
+      }
+    }
   }
 
   async function requestChatReply(transcript: Message[]) {
@@ -87,23 +232,41 @@ export default function DiscoveryApp() {
     setError(null);
     setPendingRetry(null);
 
+    const latestUser = [...transcript].reverse().find((m) => m.role === "user");
+
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: transcript }),
+        body: JSON.stringify(buildChatPayload(transcript)),
         signal: controller.signal,
       });
       const data = await response.json();
 
       if (!response.ok || !data.reply?.trim()) {
         setPendingRetry({ kind: "chat", messages: transcript });
-        setError(data.error || "AthleteOS couldn’t continue the conversation. Please try again.");
+        setError(
+          data.message ||
+            data.error ||
+            "AthleteOS couldn’t continue the conversation. Please try again.",
+        );
         return;
       }
 
       if (data.demoMode) setDemoMode(true);
-      setMessages((current) => [...current, { role: "assistant", content: data.reply.trim() }]);
+      const withAssistant: Message[] = [
+        ...transcript,
+        { id: createMessageId(), role: "assistant", content: data.reply.trim() },
+      ];
+      setMessages(withAssistant);
+
+      const userTurns = withAssistant.filter((m) => m.role === "user").length;
+      const correction = latestUser ? looksLikeAthleteCorrection(latestUser.content) : false;
+      if (correction) {
+        void updateMemory("correction", withAssistant);
+      } else if (shouldSyncMemoryCheckpoint(userTurns, lastSyncedUserTurnCountRef.current)) {
+        void updateMemory("checkpoint", withAssistant);
+      }
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         return;
@@ -124,7 +287,10 @@ export default function DiscoveryApp() {
     if (!canSendMessage(input, loading, stage)) return;
 
     const content = input.trim();
-    const nextMessages: Message[] = [...messages, { role: "user", content }];
+    const nextMessages: Message[] = [
+      ...messages,
+      { id: createMessageId(), role: "user", content },
+    ];
     setMessages(nextMessages);
     setInput("");
     await requestChatReply(nextMessages);
@@ -145,10 +311,13 @@ export default function DiscoveryApp() {
     setStage("generating");
 
     try {
+      const nextMemory =
+        (await updateMemory("pre_insights", transcript, null)) ?? memoryRef.current;
+
       const response = await fetch("/api/insights", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: transcript }),
+        body: JSON.stringify(buildInsightsPayload(transcript, nextMemory)),
         signal: controller.signal,
       });
       const data = await response.json();
@@ -160,7 +329,8 @@ export default function DiscoveryApp() {
       if (response.status === 422 || data.code === "insufficient_context") {
         setPendingRetry({ kind: "insights", messages: transcript });
         setError(
-          data.error ||
+          data.message ||
+            data.error ||
             "Need a bit more of your story before I can share a careful reflection.",
         );
         setStage("conversation");
@@ -169,7 +339,11 @@ export default function DiscoveryApp() {
 
       if (!response.ok || !data.report) {
         setPendingRetry({ kind: "insights", messages: transcript });
-        setError(data.error || "AthleteOS couldn’t finish the reflection right now.");
+        setError(
+          data.message ||
+            data.error ||
+            "AthleteOS couldn’t finish the reflection right now.",
+        );
         setStage("conversation");
         return;
       }
@@ -195,10 +369,91 @@ export default function DiscoveryApp() {
     }
   }
 
+  async function completeSession() {
+    if (!report) {
+      setStage("complete");
+      return;
+    }
+    const sessionCount = memoryRef.current.sessionCount + 1;
+    const relationshipStage = nextRelationshipStage(
+      memoryRef.current.relationshipStage,
+      sessionCount,
+    );
+    const baseMemory: AthleteMemory = {
+      ...memoryRef.current,
+      sessionCount,
+      relationshipStage,
+      updatedAt: new Date().toISOString(),
+    };
+    setMemory(baseMemory);
+    memoryRef.current = baseMemory;
+    setStage("complete");
+    void updateMemory("session_complete", messages, report, baseMemory);
+  }
+
+  async function continueConversation() {
+    if (loading) return;
+
+    chatAbortRef.current?.abort();
+    const controller = new AbortController();
+    chatAbortRef.current = controller;
+    const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+
+    setStage("conversation");
+    setLoading(true);
+    setError(null);
+    setPendingRetry(null);
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          buildChatPayload(messages, {
+            mode: "reopen",
+            report,
+          }),
+        ),
+        signal: controller.signal,
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.reply?.trim()) {
+        setPendingRetry({ kind: "reopen" });
+        setError(
+          data.message ||
+            data.error ||
+            "AthleteOS couldn’t continue the conversation. Please try again.",
+        );
+        return;
+      }
+
+      if (data.demoMode) setDemoMode(true);
+      setMessages((current) => [
+        ...current,
+        { id: createMessageId(), role: "assistant", content: data.reply.trim() },
+      ]);
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+      setPendingRetry({ kind: "reopen" });
+      setError("Network issue. Please try again.");
+    } finally {
+      clearTimeout(timer);
+      if (chatAbortRef.current === controller) {
+        chatAbortRef.current = null;
+      }
+      setLoading(false);
+    }
+  }
+
   function retryLast() {
     if (!pendingRetry || loading || stage === "generating") return;
     if (pendingRetry.kind === "chat") {
       void requestChatReply(pendingRetry.messages);
+      return;
+    }
+    if (pendingRetry.kind === "reopen") {
+      void continueConversation();
       return;
     }
     void finishConversation(pendingRetry.messages);
@@ -209,6 +464,17 @@ export default function DiscoveryApp() {
       event.preventDefault();
       void sendMessage();
     }
+  }
+
+  if (!hydrated) {
+    return (
+      <main className="welcome-shell" aria-busy="true">
+        <section className="welcome-card">
+          <span className="eyebrow">ATHLETEOS</span>
+          <p className="generating-copy">Loading…</p>
+        </section>
+      </main>
+    );
   }
 
   if (stage === "welcome") {
@@ -243,8 +509,8 @@ export default function DiscoveryApp() {
           <small>{demoMode ? "Discovery · Demo mode" : "Discovery conversation"}</small>
         </header>
         <section className="thread" aria-live="polite">
-          {messages.map((message, index) => (
-            <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
+          {messages.map((message) => (
+            <article key={message.id} className={`message ${message.role}`}>
               <span>{message.role === "assistant" ? "AthleteOS" : "You"}</span>
               <p>{message.content}</p>
             </article>
@@ -304,23 +570,31 @@ export default function DiscoveryApp() {
 
   if (stage === "generating") {
     return (
-      <main className="welcome-shell" aria-live="polite" aria-busy="true">
-        <section className="welcome-card generating-card">
-          <span className="eyebrow">ATHLETEOS</span>
-          <p className="generating-copy">Thinking through everything you’ve shared…</p>
-          <button className="secondary" type="button" onClick={resetAll}>
-            Start over
-          </button>
-        </section>
-      </main>
+      <>
+        <main className="welcome-shell" aria-live="polite" aria-busy="true">
+          <section className="welcome-card generating-card">
+            <span className="eyebrow">ATHLETEOS</span>
+            <p className="generating-copy">Thinking through everything you’ve shared…</p>
+            <button className="secondary" type="button" onClick={requestStartOver}>
+              Start over
+            </button>
+          </section>
+        </main>
+        {confirmReset && (
+          <StartOverDialog
+            onKeep={() => setConfirmReset(false)}
+            onClear={resetAll}
+          />
+        )}
+      </>
     );
   }
 
-  if (!report) {
+  if (!report && stage !== "complete") {
     return null;
   }
 
-  if (stage === "observations") {
+  if (stage === "observations" && report) {
     return (
       <ReflectionScreen
         eyebrow="Today"
@@ -337,7 +611,7 @@ export default function DiscoveryApp() {
     );
   }
 
-  if (stage === "evidence") {
+  if (stage === "evidence" && report) {
     return (
       <ReflectionScreen
         eyebrow="The pattern"
@@ -359,7 +633,7 @@ export default function DiscoveryApp() {
     );
   }
 
-  if (stage === "pattern") {
+  if (stage === "pattern" && report) {
     return (
       <ReflectionScreen
         eyebrow="Our working hypothesis"
@@ -373,13 +647,13 @@ export default function DiscoveryApp() {
     );
   }
 
-  if (stage === "focus") {
+  if (stage === "focus" && report) {
     return (
       <ReflectionScreen
         eyebrow="Our priority"
         title="If we worked on only one thing together…"
         button="Let’s begin"
-        onNext={() => setStage("complete")}
+        onNext={() => void completeSession()}
       >
         <p className="intro-copy">{report.focusIntro}</p>
         <p className="shared-priority">{report.sharedPriority}</p>
@@ -395,18 +669,60 @@ export default function DiscoveryApp() {
   }
 
   return (
-    <main className="welcome-shell">
-      <section className="welcome-card">
-        <span className="eyebrow">ATHLETEOS</span>
-        <h1>We’ll keep learning together.</h1>
-        <p className="intro-copy">
-          Whenever you’re ready, we can begin again with a fresh conversation.
+    <>
+      <main className="welcome-shell">
+        <section className="welcome-card complete-card">
+          <span className="eyebrow">ATHLETEOS</span>
+          <h1 className="complete-title">Thank you for trusting me with your story today.</h1>
+          <p className="relationship-marker">{relationshipMarkerCopy(memory.sessionCount)}</p>
+          <div className="complete-actions">
+            <button
+              className="primary"
+              type="button"
+              onClick={() => void continueConversation()}
+              disabled={loading}
+            >
+              Continue our conversation
+            </button>
+            <button className="secondary" type="button" onClick={requestStartOver} disabled={loading}>
+              Start over
+            </button>
+          </div>
+        </section>
+      </main>
+      {confirmReset && (
+        <StartOverDialog
+          onKeep={() => setConfirmReset(false)}
+          onClear={resetAll}
+        />
+      )}
+    </>
+  );
+}
+
+function StartOverDialog({
+  onKeep,
+  onClear,
+}: {
+  onKeep: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="start-over-title">
+      <div className="confirm-card">
+        <p id="start-over-title" className="confirm-copy">
+          Start over and clear everything AthleteOS has learned from this conversation?
         </p>
-        <button className="primary" type="button" onClick={resetAll}>
-          Start over
-        </button>
-      </section>
-    </main>
+        <div className="confirm-actions">
+          <button className="primary" type="button" onClick={onKeep}>
+            Keep my conversation
+          </button>
+          <button className="secondary" type="button" onClick={onClear}>
+            Clear and start over
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

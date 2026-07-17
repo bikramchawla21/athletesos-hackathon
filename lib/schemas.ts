@@ -1,20 +1,43 @@
-import { z } from "zod";
+import { memoryMessageSchema } from "./memory.mjs";
+import {
+  chatRequestStrictSchema,
+  insightsRequestStrictSchema,
+  memoryRequestStrictSchema,
+  parseChatRequest,
+  parseInsightsRequest,
+  parseMemoryRequest,
+} from "./request-contract.mjs";
 
-export const messageSchema = z.object({
-  role: z.enum(["user", "assistant"]),
-  content: z.string().min(1).max(5000),
-});
+export const messageSchema = memoryMessageSchema;
 
-export const insightsRequestSchema = z.object({
-  messages: z.array(messageSchema).min(2).max(40),
-});
+/** Canonical post-normalize insights request schema. Prefer parseInsightsRequest. */
+export const insightsRequestSchema = insightsRequestStrictSchema;
 
-export const chatRequestSchema = z.object({
-  messages: z.array(messageSchema).min(1).max(40),
-});
+/** Canonical post-normalize chat request schema. Prefer parseChatRequest. */
+export const chatRequestSchema = chatRequestStrictSchema;
+
+/** Canonical post-normalize memory request schema. Prefer parseMemoryRequest. */
+export const memoryRequestSchema = memoryRequestStrictSchema;
+
+export {
+  parseChatRequest,
+  parseInsightsRequest,
+  parseMemoryRequest,
+  chatRequestStrictSchema,
+  insightsRequestStrictSchema,
+  memoryRequestStrictSchema,
+};
 
 export {
   parseReflectionReport,
   reflectionReportJsonSchema,
   reflectionReportSchema,
 } from "./insights.mjs";
+
+export {
+  athleteMemorySchema,
+  athleteMemoryJsonSchema,
+  createEmptyAthleteMemory,
+  parseAthleteMemory,
+  mergeAthleteMemory,
+} from "./memory.mjs";
