@@ -40,4 +40,7 @@ export {
   createEmptyAthleteMemory,
   parseAthleteMemory,
   mergeAthleteMemory,
+  memoryPatchSchema,
+  parseMemoryPatch,
+  applyMemoryModelUpdate,
 } from "./memory.mjs";

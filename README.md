@@ -82,9 +82,10 @@ Body: `{ "messages": Message[], "memory"?: AthleteMemory | null, "report"?: Refl
 
 ### `POST /api/insights`
 
-Body: same message transcript shape (minimum length enforced).
+Body: `{ "messages": Message[], "memory": AthleteMemory }`
 
 - Requires enough athlete context (≥3 user turns and enough text); otherwise `422` `insufficient_context`.
+- Uses validated memory as internal grounding (never invents beyond transcript + memory).
 - Builds a `ReflectionReport` (observations, evidence, pattern, shared priority, focus areas, closing).
 - Validates model JSON with Zod; repairs once on schema failure.
 - Success: `{ "report": ReflectionReport, "demoMode": boolean }`
@@ -116,8 +117,12 @@ npm run test:memory
 1. Push this repository to GitHub (already: `bikramchawla21/athletesos-hackathon`).
 2. Import the repo in [Vercel](https://vercel.com/new).
 3. Framework preset: Next.js (default).
-4. Add environment variables: `OPENAI_API_KEY` (recommended for live demos), optional `OPENAI_MODEL`.
-5. Deploy.
+4. Add environment variables for **Production** (and Preview if used):
+   - `OPENAI_API_KEY` = a real key (`sk-…`). Required for live adaptive replies.
+   - `OPENAI_MODEL` = `gpt-4.1` (optional).
+5. Redeploy after changing env vars.
+
+Without a usable `OPENAI_API_KEY`, chat runs in **demo mode** (badge: “Discovery · Demo mode”) with deterministic question fallbacks. Demo mode never silently pretends to be live. When a key is set and OpenAI fails, the API returns `502` / `OPENAI_REQUEST_FAILED` — not fake success.
 
 CLI alternative (if Vercel CLI is installed and authenticated):
 

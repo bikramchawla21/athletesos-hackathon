@@ -7,8 +7,11 @@ import {
   createEmptyAthleteMemory,
   generateMemoryUpdate,
   getDemoMemoryUpdate,
+  memoryPatchSchema,
   memoryRequestSchema,
+  mergeAthleteMemory,
   parseAthleteMemory,
+  parseMemoryPatch,
   sanitizeMemoryMessageIds,
 } from "../lib/memory.mjs";
 import {
@@ -24,7 +27,6 @@ import {
   parsePersistedAppState,
   savePersistedState,
 } from "../lib/persistence.mjs";
-import { mergeAthleteMemory } from "../lib/memory.mjs";
 import { fallbackReport } from "../lib/insights.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -346,6 +348,37 @@ describe("persistence", () => {
     assert.equal(merged.previousPriorities.length, 1);
     assert.equal(merged.athleteCorrections.length, 1);
     assert.equal(merged.challenges.length, 1);
+  });
+
+  it("empty MemoryPatch lists do not wipe existing memories", () => {
+    const existing = createEmptyAthleteMemory();
+    existing.goals = [
+      {
+        statement: "Win my age group",
+        sourceMessageIds: ["u1"],
+        confidence: "supported",
+      },
+    ];
+    const patch = parseMemoryPatch({
+      goals: [],
+      challenges: [
+        {
+          statement: "I tighten late",
+          sourceMessageIds: ["u2"],
+          confidence: "tentative",
+        },
+      ],
+    });
+    assert.ok(memoryPatchSchema.safeParse(patch).success);
+    const merged = mergeAthleteMemory(existing, patch);
+    assert.equal(merged.goals.length, 1);
+    assert.equal(merged.goals[0].statement, "Win my age group");
+    assert.equal(merged.challenges.length, 1);
+  });
+
+  it("rejects invalid merge input", () => {
+    const existing = createEmptyAthleteMemory();
+    assert.throws(() => mergeAthleteMemory(existing, null));
   });
 });
 

@@ -52,7 +52,9 @@ export type InsightsErrorBody = {
     | "INVALID_CHAT_RESPONSE"
     | "INVALID_INSIGHTS_RESPONSE"
     | "INVALID_MEMORY_RESPONSE"
+    | "MEMORY_MERGE_FAILED"
     | "MEMORY_MIGRATION_FAILED"
+    | "PERSISTED_STATE_MIGRATION_FAILED"
     | "OPENAI_REQUEST_FAILED"
     | "insufficient_context";
   issues?: { path: string; message: string }[];
@@ -122,6 +124,50 @@ export type AthleteMemory = {
   openQuestions: string[];
   understandingCoverage: UnderstandingCoverage;
   sessionCount: number;
+};
+
+/** Partial model update — never assign directly over AthleteMemory. */
+export type MemoryPatch = {
+  identity?: {
+    name?: string | null;
+    sport?: string | null;
+    level?: string | null;
+    background?: string[];
+  };
+  goals?: MemoryItem[];
+  motivations?: MemoryItem[];
+  challenges?: MemoryItem[];
+  significantExperiences?: MemoryItem[];
+  observedPatterns?: PatternMemory[];
+  athleteCorrections?: CorrectionMemory[];
+  previousPriorities?: PriorityMemory[];
+  openQuestions?: string[];
+  understandingCoverage?: UnderstandingCoverage;
+  relationshipStage?: RelationshipStage;
+  sessionCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  version?: number;
+};
+
+export type ConversationMessage = Message;
+
+export type ChatRequest = {
+  messages: Message[];
+  memory: AthleteMemory;
+  mode?: "chat" | "reopen";
+  report?: ReflectionReport | null;
+};
+
+export type ChatResponse = {
+  reply: string;
+  demoMode: boolean;
+  safety?: boolean;
+};
+
+export type InsightsRequest = {
+  messages: Message[];
+  memory: AthleteMemory;
 };
 
 export type MemoryUpdateReason =

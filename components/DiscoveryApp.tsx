@@ -18,7 +18,7 @@ import {
   loadPersistedState,
   savePersistedState,
 } from "@/lib/persistence.mjs";
-import { canSendMessage, shouldApplyInsightsResult } from "@/lib/ui-guards.mjs";
+import { canSendMessage, shouldApplyChatResult, shouldApplyInsightsResult, shouldClearChatLoading } from "@/lib/ui-guards.mjs";
 import { relationshipMarkerCopy } from "@/lib/chat.mjs";
 import type { AppStage, AthleteMemory, Message, ReflectionReport } from "@/lib/types";
 
@@ -55,6 +55,8 @@ export default function DiscoveryApp() {
   const insightsAbortRef = useRef<AbortController | null>(null);
   const memoryAbortRef = useRef<AbortController | null>(null);
   const insightsRequestIdRef = useRef(0);
+  const chatRequestIdRef = useRef(0);
+  const persistGenerationRef = useRef(0);
   const stageRef = useRef<AppStage>("welcome");
   const memoryRef = useRef(memory);
   const lastSyncedUserTurnCountRef = useRef(0);
@@ -95,8 +97,10 @@ export default function DiscoveryApp() {
 
   useEffect(() => {
     if (!hydrated) return;
+    const generation = persistGenerationRef.current;
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
+      if (persistGenerationRef.current !== generation) return;
       savePersistedState({
         version: PERSISTED_STATE_VERSION,
         savedAt: new Date().toISOString(),
@@ -126,9 +130,15 @@ export default function DiscoveryApp() {
     insightsAbortRef.current = null;
     memoryAbortRef.current = null;
     insightsRequestIdRef.current += 1;
+    chatRequestIdRef.current += 1;
   }
 
   function resetAll() {
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+    persistGenerationRef.current += 1;
     abortInFlight();
     clearAthleteOsStorage();
     const empty = createEmptyAthleteMemory();
@@ -226,6 +236,7 @@ export default function DiscoveryApp() {
     chatAbortRef.current?.abort();
     const controller = new AbortController();
     chatAbortRef.current = controller;
+    const requestId = ++chatRequestIdRef.current;
     const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
 
     setLoading(true);
@@ -242,6 +253,10 @@ export default function DiscoveryApp() {
         signal: controller.signal,
       });
       const data = await response.json();
+
+      if (!shouldApplyChatResult(chatRequestIdRef.current, requestId)) {
+        return;
+      }
 
       if (!response.ok || !data.reply?.trim()) {
         setPendingRetry({ kind: "chat", messages: transcript });
@@ -271,14 +286,19 @@ export default function DiscoveryApp() {
       if ((err as Error).name === "AbortError") {
         return;
       }
+      if (!shouldApplyChatResult(chatRequestIdRef.current, requestId)) {
+        return;
+      }
       setPendingRetry({ kind: "chat", messages: transcript });
       setError("Network issue. Please try again.");
     } finally {
       clearTimeout(timer);
-      if (chatAbortRef.current === controller) {
+      if (shouldClearChatLoading(chatAbortRef.current, controller)) {
         chatAbortRef.current = null;
+        if (shouldApplyChatResult(chatRequestIdRef.current, requestId)) {
+          setLoading(false);
+        }
       }
-      setLoading(false);
     }
   }
 
@@ -397,6 +417,7 @@ export default function DiscoveryApp() {
     chatAbortRef.current?.abort();
     const controller = new AbortController();
     chatAbortRef.current = controller;
+    const requestId = ++chatRequestIdRef.current;
     const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
 
     setStage("conversation");
@@ -418,6 +439,10 @@ export default function DiscoveryApp() {
       });
       const data = await response.json();
 
+      if (!shouldApplyChatResult(chatRequestIdRef.current, requestId)) {
+        return;
+      }
+
       if (!response.ok || !data.reply?.trim()) {
         setPendingRetry({ kind: "reopen" });
         setError(
@@ -435,14 +460,19 @@ export default function DiscoveryApp() {
       ]);
     } catch (err) {
       if ((err as Error).name === "AbortError") return;
+      if (!shouldApplyChatResult(chatRequestIdRef.current, requestId)) {
+        return;
+      }
       setPendingRetry({ kind: "reopen" });
       setError("Network issue. Please try again.");
     } finally {
       clearTimeout(timer);
-      if (chatAbortRef.current === controller) {
+      if (shouldClearChatLoading(chatAbortRef.current, controller)) {
         chatAbortRef.current = null;
+        if (shouldApplyChatResult(chatRequestIdRef.current, requestId)) {
+          setLoading(false);
+        }
       }
-      setLoading(false);
     }
   }
 

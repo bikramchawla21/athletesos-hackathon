@@ -7,6 +7,7 @@ import {
   generateChatReply,
   generateReopeningMessage,
   getDemoChatReply,
+  pickDemoFallbackQuestion,
   relationshipMarkerCopy,
 } from "../lib/chat.mjs";
 import {
@@ -18,7 +19,12 @@ import {
 import { createEmptyAthleteMemory } from "../lib/memory.mjs";
 import { fallbackReport } from "../lib/insights.mjs";
 import { CRISIS_REPLY, detectCrisis } from "../lib/safety.mjs";
-import { canSendMessage, shouldApplyInsightsResult } from "../lib/ui-guards.mjs";
+import {
+  canSendMessage,
+  shouldApplyChatResult,
+  shouldApplyInsightsResult,
+  shouldClearChatLoading,
+} from "../lib/ui-guards.mjs";
 
 const opening = {
   id: "opening",
@@ -42,6 +48,57 @@ describe("stale insights results", () => {
     assert.equal(shouldApplyInsightsResult(3, 2, "generating"), false);
     assert.equal(shouldApplyInsightsResult(2, 2, "conversation"), false);
     assert.equal(shouldApplyInsightsResult(2, 2, "welcome"), false);
+  });
+});
+
+describe("chat request-id and loading guards", () => {
+  it("applies only the active chat request id", () => {
+    assert.equal(shouldApplyChatResult(3, 2), false);
+    assert.equal(shouldApplyChatResult(3, 3), true);
+  });
+
+  it("clears loading only for the active controller", () => {
+    const active = {};
+    const stale = {};
+    assert.equal(shouldClearChatLoading(active, active), true);
+    assert.equal(shouldClearChatLoading(active, stale), false);
+    assert.equal(shouldClearChatLoading(null, stale), false);
+  });
+});
+
+describe("demo reply variation", () => {
+  it("returns different questions for different unmatched prompts", () => {
+    const a = pickDemoFallbackQuestion("I want to develop better serve consistency this season.");
+    const b = pickDemoFallbackQuestion("My travel schedule is exhausting between tournaments.");
+    assert.notEqual(a, b);
+    assert.ok(a.includes("?"));
+    assert.ok(b.includes("?"));
+  });
+
+  it("does not reuse the old single default for Wimbledon-style goals", async () => {
+    const result = await generateChatReply(
+      [
+        opening,
+        { id: "u1", role: "user", content: "I want to win Wimbledon." },
+      ],
+      { apiKey: "" },
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.body.demoMode, true);
+    assert.notEqual(
+      result.body.reply,
+      "What should we examine first: the decision, the execution, or the recovery?",
+    );
+    assert.ok(result.body.reply.includes("?"));
+  });
+
+  it("keeps demo replies deterministic for the same input", () => {
+    const messages = [
+      opening,
+      { id: "u1", role: "user", content: "Travel between events leaves me drained." },
+    ];
+    assert.equal(getDemoChatReply(messages), getDemoChatReply(messages));
   });
 });
 
@@ -405,5 +462,14 @@ describe("contract request validation", () => {
     assert.equal(parsed.messages.length, 2);
     assert.ok(parsed.messages.every((m) => m.id));
     assert.ok(parsed.memory);
+  });
+
+  it("rejects unrecoverable memory objects that were explicitly sent", () => {
+    assert.throws(() =>
+      parseChatRequest({
+        messages: [{ id: "u1", role: "user", content: "hello there athlete" }],
+        memory: "not-an-object",
+      }),
+    );
   });
 });
