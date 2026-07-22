@@ -11,19 +11,31 @@
     "test:insights": "node --test scripts/test-insights.mjs",
     "test:hardening": "node --test scripts/test-hardening.mjs",
     "test:memory": "node --test scripts/test-memory.mjs",
-    "test": "npm run test:insights && npm run test:hardening && npm run test:memory"
+    "test:authz": "node --test scripts/test-authz.mjs",
+    "test:coach": "node --test scripts/test-coach.mjs",
+    "test": "npm run test:insights && npm run test:hardening && npm run test:memory && npm run test:authz && npm run test:coach",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.5.22",
+    "@neondatabase/serverless": "^1.1.0",
+    "drizzle-orm": "^0.45.2",
     "next": "16.2.10",
     "openai": "^5.20.1",
-    "react": "19.1.1",
-    "react-dom": "19.1.1",
+    "react": "^19.1.4",
+    "react-dom": "^19.1.4",
+    "ws": "^8.21.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "@types/ws": "^8.18.1",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9.17.0",
     "eslint-config-next": "16.2.10",
     "typescript": "^5.7.2"

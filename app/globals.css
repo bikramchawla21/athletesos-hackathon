@@ -38,7 +38,65 @@ h1 { margin: 0 0 28px; font-family: Georgia, "Times New Roman", serif; font-size
 .welcome-composer { position: relative; width: 100%; margin: 0; }
 .composer textarea { width: 100%; resize: none; border: 0; outline: 0; padding: 10px; color: var(--ink); background: transparent; font-size: 17px; }
 .composer-actions { display: flex; justify-content: space-between; gap: 12px; }
-.composer small { display: block; margin: 8px 8px 0; color: var(--muted); }
+.composer label { display: block; margin-bottom: 14px; color: var(--muted); font-size: 13px; font-weight: 650; }
+.composer input {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid #dfe2db;
+  border-radius: 14px;
+  font: inherit;
+  color: var(--ink);
+  background: #fff;
+}
+.composer input:focus { outline: 2px solid rgba(38, 60, 45, 0.25); border-color: var(--accent); }
+.team-shell {
+  width: min(820px, calc(100% - 28px));
+  margin: 0 auto 48px;
+  display: grid;
+  gap: 28px;
+}
+.team-panel {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--soft);
+}
+.team-panel h2 {
+  margin: 0 0 8px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 400;
+  font-size: 28px;
+}
+.team-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+}
+.team-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.coach-thread h1,
+.coach-thread h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 400;
+}
+.composer select {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid #dfe2db;
+  border-radius: 14px;
+  font: inherit;
+  background: #fff;
+}
 .generating-card { text-align: left; }
 .generating-copy {
   margin: 12px 0 0;

@@ -2,142 +2,163 @@
 
 **The intelligence that grows with you.**
 
-AthleteOS is a hackathon MVP of a **Performance Operating System**. It runs a typing-first discovery conversation, builds a working understanding of an athlete, and turns that understanding into an evidence-backed reflection: observations, evidence, a working pattern, and a shared priority.
+AthleteOS is a Performance Operating System MVP. Authenticated athletes run typing-first discovery conversations with durable Postgres-backed memory, then review an evidence-backed reflection: observations, evidence, a working pattern, and a shared priority.
 
-## What this MVP proves
+## What Phase 2 proves
 
-1. A calm, white, spacious welcome and discovery conversation.
-2. Adaptive follow-ups via `/api/chat` (OpenAI), with deterministic **demo mode** when no API key is set.
-3. Reflection before recommendation — no premature coaching plan.
-4. Structured insight loop rendered on locked screens:
-   - Today, here’s what I noticed.
-   - Here’s what led me to that thought.
-   - The strongest pattern I see.
-   - If we worked on only one thing together…
-5. Honest failures when an API key is configured (no silent fake “live” success).
-6. Basic crisis-safe replies that refuse to act as a therapist, doctor, or emergency service.
-7. Structured athlete memory with anonymous same-browser persistence (`localStorage`), updated at controlled checkpoints via `/api/memory`.
+1. **Clerk auth** for identity (sign-up / sign-in / sign-out). AthleteOS permissions live in Postgres, not Clerk Organizations.
+2. **Athlete workspace** onboarding with `WorkspaceMembership` (`athlete` role; `coach` reserved).
+3. **Neon Postgres + Drizzle** as system of record for conversations, messages, memory, reflections, patterns, and priorities.
+4. Adaptive `/api/chat` (and reopen), `/api/memory`, `/api/insights` — workspace-scoped when `workspaceId` is present; anonymous demo still works at `/demo`.
+5. Locked reflection screens (copy unchanged).
+6. Split start-over: **new discovery conversation** vs **reset athlete workspace**.
+7. One-time **legacy localStorage import** into the authenticated workspace.
 
 ## Tech stack
 
 - Next.js App Router (v16) + React 19 + TypeScript
-- OpenAI Responses API
-- Zod validation / structured JSON for reflection reports
-- Vercel-ready deployment
+- Clerk (auth identity)
+- Neon Postgres + Drizzle ORM / Drizzle Kit (SQL migrations)
+- OpenAI Responses API + Zod
 
 ## Local setup
 
 ```bash
 npm install
 cp .env.example .env.local
-# Optional: set a real OPENAI_API_KEY in .env.local
+# Fill Clerk + Neon + optional OpenAI keys in .env.local
+npm run db:migrate
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
+| Path | Purpose |
+|------|---------|
+| `/` | Marketing + sign-in |
+| `/sign-in`, `/sign-up` | Clerk |
+| `/app` | Ensures Person + redirects to workspace or onboarding |
+| `/app/onboarding` | Create athlete workspace |
+| `/app/w/[workspaceId]` | Authenticated AthleteOS experience |
+| `/demo` | Anonymous localStorage demo (no account) |
+
 ## Environment variables
 
-Copy from [`.env.example`](.env.example):
-
 ```env
-OPENAI_API_KEY=replace_me
+OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4.1
+
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/app
+NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/app
+
+DATABASE_URL=           # pooled Neon URL (runtime)
+DATABASE_URL_UNPOOLED=  # direct URL (migrations)
 ```
 
-| Variable | Required | Notes |
-|----------|----------|--------|
-| `OPENAI_API_KEY` | No for demo | If missing or set to `replace_me`, chat and insights run in **demo mode**. |
-| `OPENAI_MODEL` | No | Defaults to `gpt-4.1`. |
+Configure Clerk redirect URLs for `http://localhost:3000` and your Vercel preview/production domains.
 
-`.env`, `.env.local`, and `.env*.local` are gitignored. Never commit secrets.
+## Database migrations
 
-## Demo fallback behavior
+```bash
+npm run db:generate   # after schema changes
+npm run db:migrate    # apply SQL under drizzle/
+npm run db:studio     # optional Drizzle Studio
+```
 
-When there is **no usable API key**:
+**Never** run `drizzle-kit push` against production. Use generated SQL migrations only.
 
-- `/api/chat` returns a deterministic, input-aware demo reply with `demoMode: true`.
-- `/api/insights` returns a schema-valid demo `ReflectionReport` with `demoMode: true` (only if the transcript has enough athlete signal).
-- `/api/memory` returns a schema-valid demo `AthleteMemory` update with `demoMode: true`.
+## Authorization model
 
-When a **real API key is configured** and the provider fails (timeout, invalid output after one repair, network error):
+Every protected operation:
 
-- The API returns an error (`502` / validation as appropriate).
-- The UI shows the error and a **Retry** control.
-- Demo content is **not** silently substituted as a live success.
+1. Clerk `auth()` → resolve/create `Person` by `clerkUserId`
+2. Verify active `WorkspaceMembership` for the workspace
+3. Perform repository/service work
 
-## API behavior
+Cross-workspace access returns `403` / `FORBIDDEN_WORKSPACE`. Client-supplied person IDs and roles are never trusted.
 
-### `POST /api/chat`
+## API surface (Phase 2)
 
-Body: `{ "messages": Message[], "memory"?: AthleteMemory | null, "report"?: ReflectionReport | null, "mode"?: "chat" | "reopen" }`
-
-- Validates the request; rejects empty user content in normal chat mode.
-- `mode: "reopen"` generates a short context-aware continuation from memory + latest priority (no new user turn required).
-- Optional validated `memory` informs natural references and hidden coverage routing (never shown as percentages).
-- Crisis / self-harm heuristics return a fixed safe reply (no model call).
-- Otherwise: OpenAI discovery reply, or demo reply without a key.
-- When a real API key is configured, provider failures return `502` — never a silent demo success.
-- Success: `{ "reply": string, "demoMode": boolean, "safety"?: boolean }`
-
-### `POST /api/insights`
-
-Body: `{ "messages": Message[], "memory": AthleteMemory }`
-
-- Requires enough athlete context (≥3 user turns and enough text); otherwise `422` `insufficient_context`.
-- Uses validated memory as internal grounding (never invents beyond transcript + memory).
-- Builds a `ReflectionReport` (observations, evidence, pattern, shared priority, focus areas, closing).
-- Validates model JSON with Zod; repairs once on schema failure.
-- Success: `{ "report": ReflectionReport, "demoMode": boolean }`
-
-### `POST /api/memory`
-
-Body: `{ "memory": AthleteMemory, "messages": Message[], "report"?: ReflectionReport | null, "reason": "checkpoint" | "pre_insights" | "correction" | "session_complete" }`
-
-- Merges grounded updates into structured athlete memory (claims must cite message ids).
-- Validates with Zod; repairs once on schema failure; strips unknown message-id citations.
-- Success: `{ "memory": AthleteMemory, "demoMode": boolean }`
+| Route | Notes |
+|-------|--------|
+| `POST/GET /api/workspaces` | Create / list athlete workspaces |
+| `POST /api/workspaces/:id/reset` | Archive performance data (keeps account) |
+| `POST /api/conversations` | Start conversation + opening message |
+| `GET /api/conversations/:id?workspaceId=` | Load messages + memory + report |
+| `POST /api/conversations/:id/continue` | Reopen continuation |
+| `POST /api/chat` | With `workspaceId`: persist + context builders; without: anonymous demo |
+| `POST /api/memory` | Workspace: load/merge/persist memory items |
+| `POST /api/insights` | Workspace: persist reflection/pattern/priority transactionally |
+| `POST /api/legacy-import` | Idempotent import of `athletesos:v1` payload |
 
 ## Scripts
 
 ```bash
-npm run dev          # local development
-npm run build        # production build
-npm run start        # serve production build
-npm run lint         # ESLint
-npm run typecheck    # TypeScript
-npm test             # insights + hardening + memory tests
-npm run test:insights
-npm run test:hardening
-npm run test:memory
+npm run dev
+npm run build
+npm run lint
+npm run typecheck
+npm test                 # insights + hardening + memory + authz
+npm run test:authz
+npm run db:generate
+npm run db:migrate
 ```
 
-## Deploy to Vercel
+## Deploy (Vercel + Neon + Clerk)
 
-1. Push this repository to GitHub (already: `bikramchawla21/athletesos-hackathon`).
-2. Import the repo in [Vercel](https://vercel.com/new).
-3. Framework preset: Next.js (default).
-4. Add environment variables for **Production** (and Preview if used):
-   - `OPENAI_API_KEY` = a real key (`sk-…`). Required for live adaptive replies.
-   - `OPENAI_MODEL` = `gpt-4.1` (optional).
-5. Redeploy after changing env vars.
+1. Create a Neon project; copy pooled + unpooled connection strings.
+2. Create a Clerk application; add production/preview redirect URLs.
+3. In Vercel, set all env vars above for Production (and Preview).
+4. Run migrations against Neon (`DATABASE_URL_UNPOOLED`) before or as a release step: `npm run db:migrate`.
+5. Deploy. Without `OPENAI_API_KEY`, AI routes use demo mode; without Clerk/DB, use `/demo` only.
 
-Without a usable `OPENAI_API_KEY`, chat runs in **demo mode** (badge: “Discovery · Demo mode”) with deterministic question fallbacks. Demo mode never silently pretends to be live. When a key is set and OpenAI fails, the API returns `502` / `OPENAI_REQUEST_FAILED` — not fake success.
+## Product loop
 
-CLI alternative (if Vercel CLI is installed and authenticated):
+Welcome → discovery → **Share what you’ve noticed** → four reflection screens → completion → **Continue our conversation** or **New conversation** / **Reset athlete workspace**.
+
+Anonymous `/demo` still uses `localStorage` key `athletesos:v1`. Authenticated workspaces use Neon as SoR; localStorage is only for one-time legacy import.
+
+## Phase 3: Coach pilot
+
+Athlete invites one coach via a copyable invite URL. Coach accepts (email must match), completes concise onboarding, adds shared/private observations, reviews patterns, and co-approves a shared priority.
+
+### Invitation setup
+
+1. Athlete opens Team panel on `/app/w/[workspaceId]`.
+2. Enter coach email → **Invite coach**.
+3. Copy the one-time invite URL (`/invite/[token]`) and share securely.
+4. Coach signs in with the **same email**, opens the link, accepts.
+5. Coach is redirected to onboarding, then `/app/coach/w/[workspaceId]`.
+
+Tokens are stored as SHA-256 hashes, expire in 7 days, and can be revoked. Acceptance is idempotent. Removing a coach revokes membership immediately.
+
+### Visibility
+
+| Level | Athlete | Coach |
+|-------|---------|-------|
+| `athlete_private` | yes | no |
+| `coach_private` | no | author only |
+| `workspace` | yes | yes |
+
+Private coach notes never appear in athlete-visible observation lists or athlete AI contexts.
+
+### Shared priority activation
+
+Both athlete and coach must **approve**. AI never auto-activates. Historical priorities are preserved via `replaced` / `archived`.
+
+### Migrations
 
 ```bash
-npx vercel --prod
+npm run db:migrate   # applies 0000 + 0001_coach_pilot
 ```
 
-## Product loop (judge path)
+### Rollback
 
-Welcome → discovery conversation → **Share what you’ve noticed** → generating → four reflection screens → **Let’s begin** → completion (“Thank you for trusting me…”) → **Continue our conversation** (preserves transcript/memory/report + reopen message) or **Start over** (confirm, then clear all AthleteOS browser state).
+Reverse `0001_coach_pilot.sql` only on a staging clone first (enum/table drops). Prefer feature-flagging coach routes over destructive rollback in production.
 
-Anonymous same-browser persistence uses `localStorage` key `athletesos:v1` (messages, AthleteMemory, latest reflection, UI stage, relationship stage, session count). No API keys are stored in the browser.
+Still out of scope: multi-coach teams, other roles, email vendor (optional Resend later), coach messaging/calendars.
 
-## Safety and scope
-
-AthleteOS is **not** medical care, therapy, diagnosis, injury clearance, or emergency guidance. Crisis-related messages receive a short safety redirect toward human / emergency help.
-
-Out of scope for this MVP: user accounts, cloud persistence, vector databases, embeddings, knowledge-graph visualization, coach dashboard, wearables, voice, notifications, calendar plans, analytics, gamification, separate AI agents, visible confidence scores, long-term database memory (browser `localStorage` only).

@@ -14,6 +14,7 @@ import { createEmptyAthleteMemory } from "@/lib/memory.mjs";
 import { OPENING_MESSAGE_ID, createMessageId } from "@/lib/message-id.mjs";
 import {
   PERSISTED_STATE_VERSION,
+  STORAGE_KEY,
   clearAthleteOsStorage,
   loadPersistedState,
   savePersistedState,
@@ -23,10 +24,20 @@ import { relationshipMarkerCopy } from "@/lib/chat.mjs";
 import type { AppStage, AthleteMemory, Message, ReflectionReport } from "@/lib/types";
 
 type PendingRetry =
-  | { kind: "chat"; messages: Message[] }
+  | { kind: "chat"; messages: Message[]; userMessage?: Message }
   | { kind: "insights"; messages: Message[] }
   | { kind: "reopen" }
   | null;
+
+export type DiscoveryAppProps = {
+  mode?: "anonymous" | "workspace";
+  workspaceId?: string;
+  conversationId?: string;
+  initialStage?: AppStage;
+  initialMessages?: Message[];
+  initialMemory?: AthleteMemory;
+  initialReport?: ReflectionReport | null;
+};
 
 const openingMessage: Message = {
   id: OPENING_MESSAGE_ID,
@@ -38,18 +49,37 @@ const openingMessage: Message = {
 const CLIENT_TIMEOUT_MS = 30_000;
 const PERSIST_DEBOUNCE_MS = 300;
 
-export default function DiscoveryApp() {
-  const [hydrated, setHydrated] = useState(false);
-  const [stage, setStage] = useState<AppStage>("welcome");
-  const [messages, setMessages] = useState<Message[]>([openingMessage]);
-  const [memory, setMemory] = useState<AthleteMemory>(() => createEmptyAthleteMemory());
+export default function DiscoveryApp({
+  mode = "anonymous",
+  workspaceId,
+  conversationId: initialConversationId,
+  initialStage = "welcome",
+  initialMessages,
+  initialMemory,
+  initialReport = null,
+}: DiscoveryAppProps) {
+  const isWorkspace = mode === "workspace" && Boolean(workspaceId);
+  const [hydrated, setHydrated] = useState(!isWorkspace);
+  const [stage, setStage] = useState<AppStage>(isWorkspace ? initialStage : "welcome");
+  const [messages, setMessages] = useState<Message[]>(
+    () => initialMessages?.length ? initialMessages : [openingMessage],
+  );
+  const [memory, setMemory] = useState<AthleteMemory>(
+    () => initialMemory ?? createEmptyAthleteMemory(),
+  );
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(
+    initialConversationId ?? null,
+  );
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [report, setReport] = useState<ReflectionReport | null>(null);
+  const [report, setReport] = useState<ReflectionReport | null>(initialReport);
   const [error, setError] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [pendingRetry, setPendingRetry] = useState<PendingRetry>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmWorkspaceReset, setConfirmWorkspaceReset] = useState(false);
+  const [legacyPrompt, setLegacyPrompt] = useState<unknown | null>(null);
+  const [importingLegacy, setImportingLegacy] = useState(false);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
   const insightsAbortRef = useRef<AbortController | null>(null);
@@ -57,9 +87,11 @@ export default function DiscoveryApp() {
   const insightsRequestIdRef = useRef(0);
   const chatRequestIdRef = useRef(0);
   const persistGenerationRef = useRef(0);
-  const stageRef = useRef<AppStage>("welcome");
+  const stageRef = useRef<AppStage>(isWorkspace ? initialStage : "welcome");
   const memoryRef = useRef(memory);
-  const lastSyncedUserTurnCountRef = useRef(0);
+  const lastSyncedUserTurnCountRef = useRef(
+    initialMessages?.filter((m) => m.role === "user").length ?? 0,
+  );
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const athleteTurns = useMemo(
@@ -76,7 +108,26 @@ export default function DiscoveryApp() {
   }, [memory]);
 
   useEffect(() => {
-    // Hydrate from localStorage after mount (SSR-safe); defer to avoid sync setState-in-effect lint.
+    if (isWorkspace) {
+      queueMicrotask(() => {
+        const snapshot = loadPersistedState();
+        if (snapshot) {
+          setLegacyPrompt({
+            version: snapshot.version,
+            savedAt: snapshot.savedAt,
+            stage: snapshot.stage,
+            messages: snapshot.messages,
+            memory: snapshot.memory,
+            report: snapshot.report,
+            demoMode: snapshot.demoMode,
+          });
+        }
+        setHydrated(true);
+      });
+      return;
+    }
+
+    // Anonymous demo: hydrate from localStorage after mount (SSR-safe).
     const snapshot = loadPersistedState();
     queueMicrotask(() => {
       if (snapshot) {
@@ -93,10 +144,10 @@ export default function DiscoveryApp() {
       }
       setHydrated(true);
     });
-  }, []);
+  }, [isWorkspace]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || isWorkspace) return;
     const generation = persistGenerationRef.current;
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
@@ -114,7 +165,7 @@ export default function DiscoveryApp() {
     return () => {
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     };
-  }, [hydrated, stage, messages, memory, report, demoMode]);
+  }, [hydrated, isWorkspace, stage, messages, memory, report, demoMode]);
 
   useEffect(() => {
     if (stage === "conversation") {
@@ -133,7 +184,7 @@ export default function DiscoveryApp() {
     chatRequestIdRef.current += 1;
   }
 
-  function resetAll() {
+  function resetAnonymous() {
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
       persistTimerRef.current = null;
@@ -155,6 +206,63 @@ export default function DiscoveryApp() {
     setPendingRetry(null);
   }
 
+  async function startNewConversation() {
+    if (!isWorkspace || !workspaceId) {
+      resetAnonymous();
+      return;
+    }
+    abortInFlight();
+    setConfirmReset(false);
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.conversation?.id) {
+        setError(data.message || data.error || "Could not start a new conversation.");
+        return;
+      }
+      setActiveConversationId(data.conversation.id);
+      setMessages(data.messages?.length ? data.messages : [openingMessage]);
+      setMemory(data.memory ?? memoryRef.current);
+      setReport(null);
+      setStage("welcome");
+      setInput("");
+      setPendingRetry(null);
+      lastSyncedUserTurnCountRef.current = 0;
+    } catch {
+      setError("Network issue. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function resetWorkspace() {
+    if (!isWorkspace || !workspaceId) return;
+    abortInFlight();
+    setConfirmWorkspaceReset(false);
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/reset`, {
+        method: "POST",
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.message || data.error || "Could not reset workspace.");
+        return;
+      }
+      await startNewConversation();
+    } catch {
+      setError("Network issue. Please try again.");
+      setLoading(false);
+    }
+  }
+
   function requestStartOver() {
     setConfirmReset(true);
   }
@@ -168,7 +276,20 @@ export default function DiscoveryApp() {
     return result.memory;
   }
 
-  function buildChatPayload(transcript: Message[], extra: Record<string, unknown> = {}) {
+  function buildChatPayload(
+    transcript: Message[],
+    extra: Record<string, unknown> = {},
+    userMessage?: Message,
+  ) {
+    if (isWorkspace && workspaceId && activeConversationId) {
+      return {
+        workspaceId,
+        conversationId: activeConversationId,
+        clientMessageId: userMessage?.id,
+        content: userMessage?.content,
+        ...extra,
+      };
+    }
     return {
       messages: normalizeConversationMessages(transcript),
       memory: resolvedMemory(),
@@ -177,10 +298,50 @@ export default function DiscoveryApp() {
   }
 
   function buildInsightsPayload(transcript: Message[], memoryForInsights: AthleteMemory) {
+    if (isWorkspace && workspaceId && activeConversationId) {
+      return {
+        workspaceId,
+        conversationId: activeConversationId,
+      };
+    }
     return {
       messages: normalizeConversationMessages(transcript),
       memory: resolvedMemory(memoryForInsights),
     };
+  }
+
+  async function importLegacy() {
+    if (!isWorkspace || !workspaceId || !legacyPrompt) return;
+    setImportingLegacy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/legacy-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId, payload: legacyPrompt }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.message || data.error || "Import failed.");
+        return;
+      }
+      clearAthleteOsStorage();
+      setLegacyPrompt(null);
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
+      if (data.conversationId) {
+        window.location.reload();
+      }
+    } catch {
+      setError("Network issue during import.");
+    } finally {
+      setImportingLegacy(false);
+    }
+  }
+
+  function dismissLegacy() {
+    setLegacyPrompt(null);
   }
 
   async function updateMemory(
@@ -198,12 +359,21 @@ export default function DiscoveryApp() {
       const response = await fetch("/api/memory", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          memory: resolvedMemory(baseMemory),
-          messages: normalizeConversationMessages(transcript),
-          report: currentReport,
-          reason,
-        }),
+        body: JSON.stringify(
+          isWorkspace && workspaceId && activeConversationId
+            ? {
+                workspaceId,
+                conversationId: activeConversationId,
+                report: currentReport,
+                reason,
+              }
+            : {
+                memory: resolvedMemory(baseMemory),
+                messages: normalizeConversationMessages(transcript),
+                report: currentReport,
+                reason,
+              },
+        ),
         signal: controller.signal,
       });
       const data = await response.json();
@@ -232,7 +402,7 @@ export default function DiscoveryApp() {
     }
   }
 
-  async function requestChatReply(transcript: Message[]) {
+  async function requestChatReply(transcript: Message[], userMessage?: Message) {
     chatAbortRef.current?.abort();
     const controller = new AbortController();
     chatAbortRef.current = controller;
@@ -243,13 +413,14 @@ export default function DiscoveryApp() {
     setError(null);
     setPendingRetry(null);
 
-    const latestUser = [...transcript].reverse().find((m) => m.role === "user");
+    const latestUser =
+      userMessage ?? [...transcript].reverse().find((m) => m.role === "user");
 
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildChatPayload(transcript)),
+        body: JSON.stringify(buildChatPayload(transcript, {}, latestUser)),
         signal: controller.signal,
       });
       const data = await response.json();
@@ -259,7 +430,7 @@ export default function DiscoveryApp() {
       }
 
       if (!response.ok || !data.reply?.trim()) {
-        setPendingRetry({ kind: "chat", messages: transcript });
+        setPendingRetry({ kind: "chat", messages: transcript, userMessage: latestUser });
         setError(
           data.message ||
             data.error ||
@@ -271,7 +442,11 @@ export default function DiscoveryApp() {
       if (data.demoMode) setDemoMode(true);
       const withAssistant: Message[] = [
         ...transcript,
-        { id: createMessageId(), role: "assistant", content: data.reply.trim() },
+        {
+          id: data.messageId || createMessageId(),
+          role: "assistant",
+          content: data.reply.trim(),
+        },
       ];
       setMessages(withAssistant);
 
@@ -289,7 +464,7 @@ export default function DiscoveryApp() {
       if (!shouldApplyChatResult(chatRequestIdRef.current, requestId)) {
         return;
       }
-      setPendingRetry({ kind: "chat", messages: transcript });
+      setPendingRetry({ kind: "chat", messages: transcript, userMessage: latestUser });
       setError("Network issue. Please try again.");
     } finally {
       clearTimeout(timer);
@@ -307,13 +482,11 @@ export default function DiscoveryApp() {
     if (!canSendMessage(input, loading, stage)) return;
 
     const content = input.trim();
-    const nextMessages: Message[] = [
-      ...messages,
-      { id: createMessageId(), role: "user", content },
-    ];
+    const userMessage: Message = { id: createMessageId(), role: "user", content };
+    const nextMessages: Message[] = [...messages, userMessage];
     setMessages(nextMessages);
     setInput("");
-    await requestChatReply(nextMessages);
+    await requestChatReply(nextMessages, userMessage);
   }
 
   async function finishConversation(transcript: Message[] = messages) {
@@ -331,8 +504,9 @@ export default function DiscoveryApp() {
     setStage("generating");
 
     try {
-      const nextMemory =
-        (await updateMemory("pre_insights", transcript, null)) ?? memoryRef.current;
+      const nextMemory = isWorkspace
+        ? (await updateMemory("pre_insights", transcript, null)) ?? memoryRef.current
+        : (await updateMemory("pre_insights", transcript, null)) ?? memoryRef.current;
 
       const response = await fetch("/api/insights", {
         method: "POST",
@@ -456,7 +630,11 @@ export default function DiscoveryApp() {
       if (data.demoMode) setDemoMode(true);
       setMessages((current) => [
         ...current,
-        { id: createMessageId(), role: "assistant", content: data.reply.trim() },
+        {
+          id: data.messageId || createMessageId(),
+          role: "assistant",
+          content: data.reply.trim(),
+        },
       ]);
     } catch (err) {
       if ((err as Error).name === "AbortError") return;
@@ -479,7 +657,7 @@ export default function DiscoveryApp() {
   function retryLast() {
     if (!pendingRetry || loading || stage === "generating") return;
     if (pendingRetry.kind === "chat") {
-      void requestChatReply(pendingRetry.messages);
+      void requestChatReply(pendingRetry.messages, pendingRetry.userMessage);
       return;
     }
     if (pendingRetry.kind === "reopen") {
@@ -502,6 +680,44 @@ export default function DiscoveryApp() {
         <section className="welcome-card">
           <span className="eyebrow">ATHLETEOS</span>
           <p className="generating-copy">Loading…</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (legacyPrompt && isWorkspace) {
+    return (
+      <main className="welcome-shell">
+        <section className="welcome-card">
+          <span className="eyebrow">ATHLETEOS</span>
+          <h1>Import previous conversation?</h1>
+          <p>
+            We found an AthleteOS conversation saved in this browser. Import it into your
+            workspace, or continue without it.
+          </p>
+          {error && (
+            <div className="inline-error" role="alert">
+              <p>{error}</p>
+            </div>
+          )}
+          <div className="complete-actions">
+            <button
+              className="primary"
+              type="button"
+              onClick={() => void importLegacy()}
+              disabled={importingLegacy}
+            >
+              {importingLegacy ? "Importing…" : "Import previous AthleteOS conversation"}
+            </button>
+            <button
+              className="secondary"
+              type="button"
+              onClick={dismissLegacy}
+              disabled={importingLegacy}
+            >
+              Continue without importing
+            </button>
+          </div>
         </section>
       </main>
     );
@@ -612,8 +828,17 @@ export default function DiscoveryApp() {
         </main>
         {confirmReset && (
           <StartOverDialog
+            workspaceMode={isWorkspace}
             onKeep={() => setConfirmReset(false)}
-            onClear={resetAll}
+            onNewConversation={() => void startNewConversation()}
+            onResetWorkspace={() => setConfirmWorkspaceReset(true)}
+            onClearAnonymous={resetAnonymous}
+          />
+        )}
+        {confirmWorkspaceReset && (
+          <WorkspaceResetDialog
+            onCancel={() => setConfirmWorkspaceReset(false)}
+            onConfirm={() => void resetWorkspace()}
           />
         )}
       </>
@@ -714,16 +939,40 @@ export default function DiscoveryApp() {
             >
               Continue our conversation
             </button>
-            <button className="secondary" type="button" onClick={requestStartOver} disabled={loading}>
-              Start over
+            <button
+              className="secondary"
+              type="button"
+              onClick={requestStartOver}
+              disabled={loading}
+            >
+              {isWorkspace ? "New conversation" : "Start over"}
             </button>
+            {isWorkspace && (
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => setConfirmWorkspaceReset(true)}
+                disabled={loading}
+              >
+                Reset athlete workspace
+              </button>
+            )}
           </div>
         </section>
       </main>
       {confirmReset && (
         <StartOverDialog
+          workspaceMode={isWorkspace}
           onKeep={() => setConfirmReset(false)}
-          onClear={resetAll}
+          onNewConversation={() => void startNewConversation()}
+          onResetWorkspace={() => setConfirmWorkspaceReset(true)}
+          onClearAnonymous={resetAnonymous}
+        />
+      )}
+      {confirmWorkspaceReset && (
+        <WorkspaceResetDialog
+          onCancel={() => setConfirmWorkspaceReset(false)}
+          onConfirm={() => void resetWorkspace()}
         />
       )}
     </>
@@ -731,24 +980,70 @@ export default function DiscoveryApp() {
 }
 
 function StartOverDialog({
+  workspaceMode,
   onKeep,
-  onClear,
+  onNewConversation,
+  onResetWorkspace,
+  onClearAnonymous,
 }: {
+  workspaceMode: boolean;
   onKeep: () => void;
-  onClear: () => void;
+  onNewConversation: () => void;
+  onResetWorkspace: () => void;
+  onClearAnonymous: () => void;
 }) {
   return (
     <div className="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="start-over-title">
       <div className="confirm-card">
         <p id="start-over-title" className="confirm-copy">
-          Start over and clear everything AthleteOS has learned from this conversation?
+          {workspaceMode
+            ? "Start a new discovery conversation? Your saved memory and past reflections stay in this workspace."
+            : "Start over and clear everything AthleteOS has learned from this conversation?"}
         </p>
         <div className="confirm-actions">
           <button className="primary" type="button" onClick={onKeep}>
             Keep my conversation
           </button>
-          <button className="secondary" type="button" onClick={onClear}>
-            Clear and start over
+          {workspaceMode ? (
+            <>
+              <button className="secondary" type="button" onClick={onNewConversation}>
+                Start new conversation
+              </button>
+              <button className="secondary" type="button" onClick={onResetWorkspace}>
+                Reset athlete workspace…
+              </button>
+            </>
+          ) : (
+            <button className="secondary" type="button" onClick={onClearAnonymous}>
+              Clear and start over
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceResetDialog({
+  onCancel,
+  onConfirm,
+}: {
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="reset-ws-title">
+      <div className="confirm-card">
+        <p id="reset-ws-title" className="confirm-copy">
+          Reset this athlete workspace? Conversations, memory, patterns, and priorities will be
+          cleared. Your account stays signed in.
+        </p>
+        <div className="confirm-actions">
+          <button className="primary" type="button" onClick={onCancel}>
+            Keep my workspace
+          </button>
+          <button className="secondary" type="button" onClick={onConfirm}>
+            Reset workspace
           </button>
         </div>
       </div>
