@@ -9,15 +9,11 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const content = (
+  return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {isClerkConfigured() ? <ClerkProvider>{children}</ClerkProvider> : children}
+      </body>
     </html>
   );
-
-  if (!isClerkConfigured()) {
-    return content;
-  }
-
-  return <ClerkProvider>{content}</ClerkProvider>;
 }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Show, SignInButton, UserButton } from "@clerk/nextjs";
+import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
 import { isClerkConfigured } from "@/lib/env";
 
 export default function MarketingPage() {
@@ -54,18 +54,11 @@ export default function MarketingPage() {
                   Sign in
                 </button>
               </SignInButton>
-              <Link
-                className="secondary"
-                href="/sign-up"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  padding: "0.75rem 1.25rem",
-                  textDecoration: "none",
-                }}
-              >
-                Create account
-              </Link>
+              <SignUpButton mode="modal" forceRedirectUrl="/app">
+                <button className="secondary" type="button">
+                  Create account
+                </button>
+              </SignUpButton>
             </Show>
           ) : null}
           <Link

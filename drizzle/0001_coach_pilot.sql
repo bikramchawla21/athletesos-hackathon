@@ -14,7 +14,8 @@ ALTER TYPE "public"."model_operation_kind" ADD VALUE IF NOT EXISTS 'coach_onboar
 ALTER TYPE "public"."model_operation_kind" ADD VALUE IF NOT EXISTS 'perspective';
 ALTER TYPE "public"."model_operation_kind" ADD VALUE IF NOT EXISTS 'shared_priority';
 
--- Expand priority_status safely via rename + remap
+-- Expand priority_status safely via column swap
+-- (ALTER ... TYPE enum remap hits operator errors on Neon/serverless)
 ALTER TYPE "public"."priority_status" RENAME TO "priority_status_old";
 CREATE TYPE "public"."priority_status" AS ENUM(
   'proposed',
@@ -26,16 +27,16 @@ CREATE TYPE "public"."priority_status" AS ENUM(
   'replaced',
   'archived'
 );
-ALTER TABLE "priorities" ALTER COLUMN "status" DROP DEFAULT;
-ALTER TABLE "priorities"
-  ALTER COLUMN "status" TYPE "public"."priority_status"
-  USING (
-    CASE
-      WHEN "status"::text = 'active' THEN 'active'::"public"."priority_status"
-      WHEN "status"::text = 'completed' THEN 'completed'::"public"."priority_status"
-      ELSE 'archived'::"public"."priority_status"
-    END
-  );
+ALTER TABLE "priorities" ADD COLUMN "status_new" "public"."priority_status";
+UPDATE "priorities"
+SET "status_new" = CASE "status"::text
+  WHEN 'active' THEN 'active'::"public"."priority_status"
+  WHEN 'completed' THEN 'completed'::"public"."priority_status"
+  ELSE 'archived'::"public"."priority_status"
+END;
+ALTER TABLE "priorities" DROP COLUMN "status";
+ALTER TABLE "priorities" RENAME COLUMN "status_new" TO "status";
+ALTER TABLE "priorities" ALTER COLUMN "status" SET NOT NULL;
 ALTER TABLE "priorities" ALTER COLUMN "status" SET DEFAULT 'proposed'::"public"."priority_status";
 DROP TYPE "public"."priority_status_old";
 
@@ -63,7 +64,7 @@ ALTER TABLE "priorities"
 ALTER TABLE "timeline_events"
   ADD COLUMN IF NOT EXISTS "visibility" "public"."visibility_level" DEFAULT 'workspace' NOT NULL;
 
--- Observations: attribution + visibility; conversation optional
+-- Observations: attribution + visibility (conversation optional)
 ALTER TABLE "observations" ALTER COLUMN "conversation_id" DROP NOT NULL;
 ALTER TABLE "observations"
   ADD COLUMN IF NOT EXISTS "author_person_id" uuid,
