@@ -102,7 +102,8 @@ npm run dev
 npm run build
 npm run lint
 npm run typecheck
-npm test                 # insights + hardening + memory + authz
+npm test                 # insights + hardening + memory + authz + coach + pwa
+npm run test:pwa
 npm run test:authz
 npm run db:generate
 npm run db:migrate
@@ -161,4 +162,63 @@ npm run db:migrate   # applies 0000 + 0001_coach_pilot
 Reverse `0001_coach_pilot.sql` only on a staging clone first (enum/table drops). Prefer feature-flagging coach routes over destructive rollback in production.
 
 Still out of scope: multi-coach teams, other roles, email vendor (optional Resend later), coach messaging/calendars.
+
+## Progressive Web App (Phase 1)
+
+AthleteOS is installable as a lightweight PWA for the athlete–coach pilot. Product behavior is unchanged; this layer adds installability, an honest offline fallback, and safe update prompts.
+
+### Architecture
+
+| Piece | Location | Role |
+|-------|----------|------|
+| Web app manifest | [`app/manifest.ts`](app/manifest.ts) | `standalone`, icons, `start_url: /` |
+| Icons | [`public/icons/`](public/icons/), [`public/favicon.png`](public/favicon.png) | 192, 512, maskable 512, Apple touch |
+| Service worker | [`public/sw.js`](public/sw.js) | Conservative shell caching only |
+| Offline page | [`public/offline.html`](public/offline.html) | Explicit offline message |
+| Client UX | [`components/PwaProvider.tsx`](components/PwaProvider.tsx) | Register SW (production), install help, update banner |
+| Helpers | [`lib/pwa.ts`](lib/pwa.ts) | Standalone / iOS / install-prompt rules |
+| Pilot guide | [`docs/pilot-install.md`](docs/pilot-install.md) | Short iPhone / Android install steps |
+
+### Caching rules
+
+| Request | Strategy |
+|---------|----------|
+| `/_next/static/*`, `/icons/*`, favicon, `/offline.html` | Cache-first |
+| HTML navigations | Network-only; on failure serve `/offline.html` |
+| `/api/*`, `/sign-in`, `/sign-up`, Clerk paths | Network-only — **never** cached |
+| Mutations / personalized JSON | Not stored in the service worker |
+
+API responses also send `Cache-Control: private, no-store` via [`next.config.ts`](next.config.ts).
+
+### Offline limitations
+
+- No offline AI chat, workspace writes, or coach observations.
+- Unsent composer text stays in the input until you send; failed sends keep retry UI without faking success.
+- Demo `localStorage` is unrelated to the service-worker cache.
+
+### Development registration
+
+The service worker registers only when `NODE_ENV === "production"` (e.g. `npm run build && npm start`). `next dev` does not register it.
+
+### Unregister / clear the service worker
+
+1. Chrome/Edge DevTools → Application → Service Workers → Unregister.
+2. Or in the browser console on your origin:
+
+```js
+navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister()));
+caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)));
+```
+
+Bump `CACHE_VERSION` in `public/sw.js` when intentionally invalidating the shell cache.
+
+### Device checklist
+
+- [ ] iPhone Safari: open → sign in → Add to Home Screen → launch standalone → workspace action → offline fallback → Update banner after redeploy
+- [ ] Android Chrome: install → launch → sign in → workspace action → offline fallback → update
+- [ ] Mobile browser without install still works
+- [ ] Desktop unchanged
+
+Clerk production domains must allow the installed origin (same as normal web).
+
 

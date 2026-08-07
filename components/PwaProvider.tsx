@@ -30,7 +30,7 @@ export function PwaProvider() {
         window.navigator as Navigator & { standalone?: boolean },
       ),
     );
-    setIsIos(isIosLikeUserAgent(window.navigator.userAgent));
+    setIsIos(isIosLikeUserAgent(window.navigator.userAgent, window.navigator));
     setDismissed(readInstallDismissed(window.localStorage));
 
     const onBeforeInstall = (event: Event) => {

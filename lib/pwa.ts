@@ -15,12 +15,15 @@ export function isStandaloneDisplayMode(
   return false;
 }
 
-export function isIosLikeUserAgent(userAgent: string): boolean {
+export function isIosLikeUserAgent(
+  userAgent: string,
+  nav: { maxTouchPoints?: number } = {},
+): boolean {
   const ua = userAgent.toLowerCase();
-  const iOSDevice = /iphone|ipad|ipod/.test(ua);
-  // iPadOS 13+ desktop UA still includes Macintosh + touch
-  const iPadDesktop = ua.includes("macintosh") && ua.includes("safari") && !ua.includes("chrome");
-  return iOSDevice || iPadDesktop;
+  if (/iphone|ipad|ipod/.test(ua)) return true;
+  // iPadOS 13+ may report as Macintosh; require touch points.
+  if (ua.includes("macintosh") && (nav.maxTouchPoints ?? 0) > 1) return true;
+  return false;
 }
 
 export function shouldShowAndroidInstallAction(options: {

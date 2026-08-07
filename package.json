@@ -13,7 +13,8 @@
     "test:memory": "node --test scripts/test-memory.mjs",
     "test:authz": "node --test scripts/test-authz.mjs",
     "test:coach": "node --test scripts/test-coach.mjs",
-    "test": "npm run test:insights && npm run test:hardening && npm run test:memory && npm run test:authz && npm run test:coach",
+    "test:pwa": "node --test scripts/test-pwa.mjs",
+    "test": "npm run test:insights && npm run test:hardening && npm run test:memory && npm run test:authz && npm run test:coach && npm run test:pwa",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio"
