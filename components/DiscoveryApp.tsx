@@ -668,10 +668,14 @@ export default function DiscoveryApp({
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      void sendMessage();
-    }
+    // On touch/coarse pointers, Enter inserts a newline (soft keyboards).
+    // Desktop keeps Enter-to-send; Shift+Enter always inserts a newline.
+    if (event.key !== "Enter" || event.shiftKey) return;
+    const coarse =
+      typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+    if (coarse) return;
+    event.preventDefault();
+    void sendMessage();
   }
 
   if (!hydrated) {
