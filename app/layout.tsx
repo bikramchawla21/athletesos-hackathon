@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
-import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
+import { PwaProvider } from "@/components/PwaProvider";
 import { isClerkConfigured } from "@/lib/env";
 import "./globals.css";
 
@@ -35,7 +35,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body>
         {isClerkConfigured() ? <ClerkProvider>{children}</ClerkProvider> : children}
-        <ServiceWorkerRegister />
+        <PwaProvider />
       </body>
     </html>
   );
