@@ -18,11 +18,17 @@ const isProtectedRoute = createRouteMatcher([
   "/api/admin(.*)",
 ]);
 
-const clerkHandler = clerkMiddleware(async (auth, request) => {
-  if (isProtectedRoute(request)) {
-    await auth.protect();
-  }
-});
+const clerkHandler = clerkMiddleware(
+  async (auth, request) => {
+    if (isProtectedRoute(request)) {
+      await auth.protect();
+    }
+  },
+  {
+    // Required for Clerk production on *.vercel.app (provider domain → /__clerk).
+    frontendApiProxy: { enabled: true },
+  },
+);
 
 export default function middleware(request: NextRequest, event: unknown) {
   if (!isClerkConfigured()) {
@@ -41,6 +47,8 @@ export default function middleware(request: NextRequest, event: unknown) {
 
 export const config = {
   matcher: [
+    // Must include /__clerk even for *.js — otherwise clerk.browser.js 404s and SignIn is blank.
+    "/__clerk/(.*)",
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",
   ],
