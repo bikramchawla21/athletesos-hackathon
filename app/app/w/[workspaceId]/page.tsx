@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { isDatabaseConfigured } from "@/db/client";
@@ -13,12 +14,14 @@ import { loadActiveReflectionReport } from "@/server/services/insights-persist-s
 import WorkspaceDiscoveryApp from "@/components/WorkspaceDiscoveryApp";
 import InviteCoachPanel from "@/components/InviteCoachPanel";
 import AthleteCollaborationPanel from "@/components/AthleteCollaborationPanel";
+import VoiceHome from "@/components/VoiceHome";
 import type { AppStage } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 type PageProps = {
   params: Promise<{ workspaceId: string }>;
+  searchParams: Promise<{ view?: string }>;
 };
 
 function inferStage(args: {
@@ -30,24 +33,39 @@ function inferStage(args: {
   return "welcome";
 }
 
-export default async function WorkspacePage({ params }: PageProps) {
+export default async function WorkspacePage({ params, searchParams }: PageProps) {
   if (!isDatabaseConfigured()) {
     redirect("/demo?reason=database");
   }
 
   const { workspaceId } = await params;
+  const { view } = await searchParams;
+  const classicView = view === "classic";
 
   let access;
   try {
     access = await requireWorkspaceRole(workspaceId, ["athlete"]);
   } catch {
-    // Coaches use a different surface
     try {
       await requireWorkspaceRole(workspaceId, ["coach"]);
       redirect(`/app/coach/w/${workspaceId}`);
     } catch {
       notFound();
     }
+  }
+
+  if (!classicView) {
+    return (
+      <>
+        <div className="voice-chrome">
+          <UserButton />
+          <Link className="voice-subtle-link" href={`/app/w/${workspaceId}?view=classic`}>
+            History
+          </Link>
+        </div>
+        <VoiceHome workspaceId={workspaceId} />
+      </>
+    );
   }
 
   let conversation = await getLatestConversation(workspaceId, "athlete_discovery");
@@ -73,8 +91,11 @@ export default async function WorkspacePage({ params }: PageProps) {
 
   return (
     <>
-      <div style={{ position: "fixed", top: 12, right: 16, zIndex: 40 }}>
+      <div className="voice-chrome">
         <UserButton />
+        <Link className="voice-subtle-link" href={`/app/w/${workspaceId}`}>
+          Talk
+        </Link>
       </div>
       <WorkspaceDiscoveryApp
         workspaceId={workspaceId}

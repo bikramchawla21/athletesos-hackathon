@@ -12,9 +12,10 @@
     "test:hardening": "node --test scripts/test-hardening.mjs",
     "test:memory": "node --test scripts/test-memory.mjs",
     "test:memory-isolation": "node --test scripts/test-memory-isolation.mjs",
+    "test:voice-home": "node --experimental-strip-types --test scripts/test-voice-home.mjs",
     "test:authz": "node --test scripts/test-authz.mjs",
     "test:coach": "node --test scripts/test-coach.mjs",
-    "test": "npm run test:insights && npm run test:hardening && npm run test:memory && npm run test:memory-isolation && npm run test:authz && npm run test:coach",
+    "test": "npm run test:insights && npm run test:hardening && npm run test:memory && npm run test:memory-isolation && npm run test:voice-home && npm run test:authz && npm run test:coach",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio"
