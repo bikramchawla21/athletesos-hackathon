@@ -17,7 +17,7 @@ import {
   recordModelOperation,
 } from "@/server/services/context-builders";
 import {
-  buildMessageIdLookup,
+  buildWorkspaceMessageIdLookup,
   loadAthleteMemory,
   persistAthleteMemory,
 } from "@/server/services/memory-service";
@@ -131,7 +131,7 @@ async function handleWorkspaceMemory(json: unknown) {
     return NextResponse.json(result.body, { status: result.status });
   }
 
-  const lookup = await buildMessageIdLookup(body.conversationId);
+  const lookup = await buildWorkspaceMessageIdLookup(body.workspaceId);
   await persistAthleteMemory(body.workspaceId, result.body.memory, lookup);
   const persisted = await loadAthleteMemory(body.workspaceId);
 

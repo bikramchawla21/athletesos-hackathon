@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   athleteWorkspaces,
+  conversations,
   memoryItemSources,
   memoryItems,
   messages,
@@ -304,6 +305,30 @@ export async function buildMessageIdLookup(
     .select()
     .from(messages)
     .where(eq(messages.conversationId, conversationId));
+  const map = new Map<string, string>();
+  for (const m of rows) {
+    map.set(m.id, m.id);
+    if (m.clientMessageId) map.set(m.clientMessageId, m.id);
+  }
+  return map;
+}
+
+/**
+ * Map client/message ids → DB message ids for an entire workspace.
+ * Required so checkpoint persistence can keep source links to prior conversations.
+ */
+export async function buildWorkspaceMessageIdLookup(
+  workspaceId: string,
+): Promise<Map<string, string>> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: messages.id,
+      clientMessageId: messages.clientMessageId,
+    })
+    .from(messages)
+    .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+    .where(eq(conversations.workspaceId, workspaceId));
   const map = new Map<string, string>();
   for (const m of rows) {
     map.set(m.id, m.id);

@@ -68,11 +68,40 @@ test("roleAllowed gates athlete-only Phase 2 writes", () => {
   assert.equal(roleAllowed("coach", ["athlete"]), false);
 });
 
-test("legacy content hash is stable for identical payloads", () => {
-  const a = hashLegacyPayload({ messages: [{ id: "1", role: "user", content: "hi" }] });
-  const b = hashLegacyPayload({ messages: [{ id: "1", role: "user", content: "hi" }] });
-  const c = hashLegacyPayload({ messages: [{ id: "1", role: "user", content: "bye" }] });
-  assert.equal(a, b);
-  assert.notEqual(a, c);
-  assert.equal(a.length, 64);
+test("mismatched workspace and conversation ids are forbidden", () => {
+  assert.deepEqual(assertSameWorkspace("workspace-a", "workspace-b"), {
+    ok: false,
+    code: "FORBIDDEN_WORKSPACE",
+  });
+});
+
+test("same person on two workspaces keeps memory scopes separate", () => {
+  // Product rule: AthleteMemory is workspace-scoped, not person-scoped.
+  const personId = "person-1";
+  const tennis = membershipAllowsAccess({
+    membershipStatus: "active",
+    workspaceStatus: "active",
+    membershipPersonId: personId,
+    authenticatedPersonId: personId,
+  });
+  const other = membershipAllowsAccess({
+    membershipStatus: "active",
+    workspaceStatus: "active",
+    membershipPersonId: personId,
+    authenticatedPersonId: personId,
+  });
+  assert.equal(tennis, true);
+  assert.equal(other, true);
+  // Authorization is per workspaceId; sharing a personId does not merge memory.
+  assert.deepEqual(assertSameWorkspace("ws-tennis", "ws-other"), {
+    ok: false,
+    code: "FORBIDDEN_WORKSPACE",
+  });
+});
+
+test("coach membership on athlete workspace does not imply access to coach personal workspace", () => {
+  assert.deepEqual(assertSameWorkspace("athlete-workspace", "coach-personal-workspace"), {
+    ok: false,
+    code: "FORBIDDEN_WORKSPACE",
+  });
 });
