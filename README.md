@@ -97,6 +97,16 @@ Cross-workspace access returns `403` / `FORBIDDEN_WORKSPACE`. Client-supplied pe
 | `POST /api/speech` | Auth TTS; generated audio ephemeral |
 | `POST /api/legacy-import` | Idempotent import of `athletesos:v1` payload |
 
+## Founder pilot dashboard (Pass 8)
+
+Internal read-only ops view at [`/admin/pilot`](/admin/pilot).
+
+Authorize with server-only env `FOUNDER_CLERK_USER_IDS` (comma-separated Clerk user IDs). Ordinary athletes/coaches are redirected away.
+
+Metrics aggregate existing Neon tables + `pilot_events`. Opening the dashboard does not mutate AthleteMemory.
+
+From Pass 8 forward, insight persistence writes `pattern_evidence` with real `message` source IDs (session + historical memory-linked messages) so cross-session / oldest-evidence metrics can be calculated. Pre-Pass-8 reflections may show **Unavailable** for provenance.
+
 ## Pilot launch ops (Pass 7)
 
 See [docs/pilot-ops.md](docs/pilot-ops.md) for environment separation, pilot events, backup checklist, cost visibility, and founder health SQL (`npm run pilot:health`).

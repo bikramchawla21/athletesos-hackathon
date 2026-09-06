@@ -1,7 +1,10 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   focusAreas,
+  memoryItemSources,
+  memoryItems,
+  messages,
   patternEvidence,
   patterns,
   priorities,
@@ -15,6 +18,11 @@ import type { ReflectionReport } from "@/lib/types";
 /**
  * Persist insights atomically: pattern + reflection + priority (+ focus areas).
  * Archives previous active priority for the workspace.
+ *
+ * Provenance (Pass 8 additive): pattern_evidence rows use sourceType "message"
+ * with real message UUIDs from this conversation plus any workspace memory-linked
+ * messages from other conversations. Legacy self-referential observation rows
+ * are no longer written.
  */
 export async function persistInsightsResult(args: {
   workspaceId: string;
@@ -48,14 +56,71 @@ export async function persistInsightsResult(args: {
 
     if (!pattern) throw new Error("Failed to insert pattern.");
 
-    for (const evidence of args.report.evidence) {
+    const sessionMessages = await tx
+      .select({
+        id: messages.id,
+        role: messages.role,
+      })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, args.conversationId),
+          eq(messages.workspaceId, args.workspaceId),
+        ),
+      );
+
+    const linkedMessageIds = new Set<string>();
+    for (const msg of sessionMessages) {
+      if (msg.role !== "user") continue;
+      linkedMessageIds.add(msg.id);
       await tx.insert(patternEvidence).values({
         patternId: pattern.id,
-        sourceType: "observation",
-        sourceId: pattern.id,
-        note: `${evidence.category}: ${evidence.explanation}`,
+        sourceType: "message",
+        sourceId: msg.id,
+        note: "session_user_message",
       });
     }
+
+    // Historical memory-linked messages from other conversations (same workspace).
+    const activeMemory = await tx
+      .select({ id: memoryItems.id })
+      .from(memoryItems)
+      .where(
+        and(
+          eq(memoryItems.workspaceId, args.workspaceId),
+          eq(memoryItems.status, "active"),
+        ),
+      );
+    const memoryIds = activeMemory.map((m) => m.id);
+    if (memoryIds.length > 0) {
+      const sources = await tx
+        .select({
+          messageId: memoryItemSources.messageId,
+          conversationId: messages.conversationId,
+        })
+        .from(memoryItemSources)
+        .innerJoin(messages, eq(messages.id, memoryItemSources.messageId))
+        .where(
+          and(
+            inArray(memoryItemSources.memoryItemId, memoryIds),
+            ne(messages.conversationId, args.conversationId),
+            eq(messages.workspaceId, args.workspaceId),
+          ),
+        );
+
+      for (const source of sources) {
+        if (!source.messageId || linkedMessageIds.has(source.messageId)) continue;
+        linkedMessageIds.add(source.messageId);
+        await tx.insert(patternEvidence).values({
+          patternId: pattern.id,
+          sourceType: "message",
+          sourceId: source.messageId,
+          note: "historical_memory_message",
+        });
+      }
+    }
+
+    // Category/explanation labels remain on reflections.evidence jsonb — not as fake FK rows.
 
     const [reflection] = await tx
       .insert(reflections)

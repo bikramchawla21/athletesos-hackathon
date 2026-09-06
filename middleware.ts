@@ -5,6 +5,7 @@ import { isClerkConfigured } from "@/lib/env";
 
 const isProtectedRoute = createRouteMatcher([
   "/app(.*)",
+  "/admin(.*)",
   "/invite(.*)",
   "/api/workspaces(.*)",
   "/api/conversations(.*)",
@@ -14,6 +15,7 @@ const isProtectedRoute = createRouteMatcher([
   "/api/notifications(.*)",
   "/api/transcribe(.*)",
   "/api/speech(.*)",
+  "/api/admin(.*)",
 ]);
 
 const clerkHandler = clerkMiddleware(async (auth, request) => {

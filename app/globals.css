@@ -403,3 +403,201 @@ h1 { margin: 0 0 28px; font-family: Georgia, "Times New Roman", serif; font-size
 .pwa-banner-actions .secondary {
   min-height: 44px;
 }
+
+/* Internal founder pilot dashboard (desktop-first, not athlete UI) */
+.admin-pilot {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px 80px;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--ink);
+}
+.admin-pilot-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.admin-pilot h1 {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.admin-eyebrow {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.admin-sub {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+  max-width: 52rem;
+}
+.admin-link {
+  color: var(--ink);
+  font-weight: 650;
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+}
+.admin-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 28px;
+}
+.admin-metric-grid article {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fafaf8;
+}
+.admin-metric-grid h2 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.admin-metric-grid ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.admin-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.admin-table-section {
+  margin-top: 12px;
+}
+.admin-table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.admin-table-toolbar h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.admin-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.admin-filters a {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+.admin-filters a.is-active {
+  color: var(--ink);
+  border-color: #c9cdc4;
+  background: #fff;
+}
+.admin-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.admin-table th,
+.admin-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.admin-table th button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+}
+.admin-table tbody tr:hover {
+  background: #f7f8f5;
+}
+.admin-muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+.admin-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  border: 1px solid var(--line);
+}
+.admin-status-active {
+  background: #eef6ea;
+}
+.admin-status-at_risk {
+  background: #f8f1e3;
+}
+.admin-status-inactive,
+.admin-status-never {
+  background: #f3f3f1;
+}
+.admin-detail-block {
+  margin: 28px 0;
+}
+.admin-detail-block h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+.admin-insight-card {
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.admin-insight-card h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 650;
+}
+.admin-evidence-timeline {
+  margin: 8px 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.admin-evidence-reveal {
+  margin-top: 10px;
+}
+.admin-evidence-reveal ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.45;
+}
