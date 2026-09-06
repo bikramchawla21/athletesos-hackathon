@@ -29,6 +29,11 @@ type RecorderControls = {
   clearRecording: () => void;
 };
 
+type UseVoiceRecorderOptions = {
+  /** Fired once when a non-cancelled recording is finalized (local File ready). */
+  onRecordingComplete?: (recording: CompletedRecording) => void;
+};
+
 function classifyGetUserMediaError(error: unknown): VoiceRecordingErrorCode {
   const name = error instanceof DOMException ? error.name : "";
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
@@ -55,9 +60,14 @@ function revokeUrl(url: string | null | undefined) {
 
 /**
  * Browser MediaRecorder session for the AthleteOS voice-first PWA.
- * Audio stays local in this pass; later passes will upload the File for STT.
+ * Produces a local File for POST /api/transcribe (VoiceHome uploads after stop).
  */
-export function useVoiceRecorder(): RecorderControls {
+export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}): RecorderControls {
+  const onRecordingCompleteRef = useRef(options.onRecordingComplete);
+  useEffect(() => {
+    onRecordingCompleteRef.current = options.onRecordingComplete;
+  }, [options.onRecordingComplete]);
+
   const [state, setState] = useState<VoiceRecordingState>("idle");
   const [elapsedMs, setElapsedMs] = useState(0);
   const [errorCode, setErrorCode] = useState<VoiceRecordingErrorCode | null>(null);
@@ -133,9 +143,11 @@ export function useVoiceRecorder(): RecorderControls {
     const objectUrl = URL.createObjectURL(blob);
     objectUrlRef.current = objectUrl;
     const file = recordingToFile(blob, mimeType);
-    setRecording({ blob, file, mimeType, durationMs, objectUrl });
+    const completed: CompletedRecording = { blob, file, mimeType, durationMs, objectUrl };
+    setRecording(completed);
     setState("recorded");
     resetSession();
+    onRecordingCompleteRef.current?.(completed);
   }, [resetSession]);
 
   const stop = useCallback(() => {

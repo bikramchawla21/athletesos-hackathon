@@ -12,6 +12,7 @@ const isProtectedRoute = createRouteMatcher([
   "/api/invites(.*)",
   "/api/patterns(.*)",
   "/api/notifications(.*)",
+  "/api/transcribe(.*)",
 ]);
 
 const clerkHandler = clerkMiddleware(async (auth, request) => {

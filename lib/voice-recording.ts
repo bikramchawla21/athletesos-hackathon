@@ -5,11 +5,20 @@ export const VOICE_PROMPT = "Talk about how your day went.";
 /** Hard stop — do not allow indefinite recording. */
 export const MAX_RECORDING_MS = 3 * 60 * 1000;
 
+/**
+ * Browser MIME negotiation (MediaRecorder.isTypeSupported):
+ * - iPhone Safari / Home Screen PWA: typically `audio/mp4` (AAC in MP4 / m4a)
+ * - Chrome desktop / Android: typically `audio/webm;codecs=opus` or `audio/webm`
+ * Preference order tries iOS-friendly containers first, then webm/ogg.
+ * OpenAI gpt-4o-mini-transcribe accepts these without client-side transcoding.
+ */
 export type VoiceRecordingState =
   | "idle"
   | "requesting_permission"
   | "listening"
   | "recorded"
+  | "transcribing"
+  | "transcript_ready"
   | "error";
 
 export type VoiceRecordingErrorCode =
@@ -17,6 +26,10 @@ export type VoiceRecordingErrorCode =
   | "unsupported"
   | "no_microphone"
   | "recording_failed"
+  | "upload_failed"
+  | "empty_transcript"
+  | "stt_failed"
+  | "auth_failed"
   | "unknown";
 
 const PREFERRED_MIME_TYPES = [
@@ -57,6 +70,14 @@ export function errorCopy(code: VoiceRecordingErrorCode): string {
       return "No microphone was found.";
     case "recording_failed":
       return "Recording didn’t work. Try again.";
+    case "upload_failed":
+      return "Couldn't send that. Try again.";
+    case "empty_transcript":
+      return "We didn’t quite catch that. Try again.";
+    case "stt_failed":
+      return "Couldn't send that. Try again.";
+    case "auth_failed":
+      return "Sign in again to keep talking.";
     default:
       return "Something went wrong. Try again.";
   }
@@ -70,8 +91,7 @@ export function extensionForMime(mime: string): string {
 }
 
 /**
- * Build a File ready for a future POST /api/transcribe multipart upload.
- * Next Agent pass can send this directly.
+ * Build a File ready for POST /api/transcribe multipart upload.
  */
 export function recordingToFile(blob: Blob, mimeType: string, recordedAt = new Date()): File {
   const ext = extensionForMime(mimeType || blob.type || "audio/webm");

@@ -290,6 +290,19 @@ h1 { margin: 0 0 28px; font-family: Georgia, "Times New Roman", serif; font-size
   width: min(320px, 100%);
   margin-top: 18px;
 }
+.voice-transcript {
+  margin: 8px 0 0;
+  max-width: 34rem;
+  font-size: clamp(1.05rem, 2.4vw, 1.25rem);
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre-wrap;
+  text-align: left;
+}
+.voice-mic-busy {
+  pointer-events: none;
+  opacity: 0.85;
+}
 .voice-dev-note {
   margin-top: 20px;
   color: var(--muted);

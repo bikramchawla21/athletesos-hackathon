@@ -11,6 +11,7 @@ import {
   pickSupportedMimeType,
   recordingToFile,
 } from "../lib/voice-recording.ts";
+import { uploadRecordingForTranscription } from "../lib/upload-transcription.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -29,7 +30,11 @@ describe("voice recording helpers", () => {
     assert.equal(formatElapsed(125_000), "02:05");
   });
 
-  it("picks a supported mime type when available", () => {
+  it("picks iOS-friendly mime before webm when both supported", () => {
+    assert.equal(
+      pickSupportedMimeType((mime) => mime === "audio/mp4" || mime.startsWith("audio/webm")),
+      "audio/mp4",
+    );
     assert.equal(
       pickSupportedMimeType((mime) => mime === "audio/webm"),
       "audio/webm",
@@ -40,7 +45,7 @@ describe("voice recording helpers", () => {
     );
   });
 
-  it("builds a File suitable for future multipart STT upload", () => {
+  it("builds a File suitable for multipart STT upload", () => {
     const blob = new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" });
     const file = recordingToFile(blob, "audio/webm", new Date("2026-01-02T03:04:05.000Z"));
     assert.equal(file.type, "audio/webm");
@@ -48,8 +53,58 @@ describe("voice recording helpers", () => {
     assert.ok(file.size > 0);
   });
 
-  it("maps permission errors to athlete-facing copy", () => {
+  it("maps permission and upload errors to athlete-facing copy", () => {
     assert.match(errorCopy("permission_denied"), /Microphone access is needed/);
+    assert.match(errorCopy("upload_failed"), /Couldn't send that/);
+    assert.match(errorCopy("empty_transcript"), /didn’t quite catch that|didn't quite catch that/);
+  });
+});
+
+describe("uploadRecordingForTranscription", () => {
+  it("posts multipart file and returns transcript text", async () => {
+    const file = new File([new Uint8Array([9, 9])], "a.webm", { type: "audio/webm" });
+    const result = await uploadRecordingForTranscription({
+      file,
+      workspaceId: "11111111-1111-1111-1111-111111111111",
+      fetchImpl: async (url, init) => {
+        assert.equal(url, "/api/transcribe");
+        assert.equal(init?.method, "POST");
+        assert.ok(init?.body instanceof FormData);
+        const body = init.body;
+        assert.ok(body.get("file") instanceof File);
+        assert.equal(body.get("workspaceId"), "11111111-1111-1111-1111-111111111111");
+        return new Response(JSON.stringify({ text: "Practice was good today." }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    assert.deepEqual(result, { ok: true, text: "Practice was good today." });
+  });
+
+  it("maps empty transcript responses for retry UX", async () => {
+    const file = new File([new Uint8Array([9])], "a.webm", { type: "audio/webm" });
+    const result = await uploadRecordingForTranscription({
+      file,
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ code: "EMPTY_TRANSCRIPT", error: "We didn’t quite catch that. Try again." }), {
+          status: 422,
+        }),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "empty_transcript");
+  });
+
+  it("keeps upload failure distinct so local audio can be retried", async () => {
+    const file = new File([new Uint8Array([9])], "a.webm", { type: "audio/webm" });
+    const result = await uploadRecordingForTranscription({
+      file,
+      fetchImpl: async () => {
+        throw new TypeError("network down");
+      },
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "upload_failed");
   });
 });
 
@@ -61,8 +116,12 @@ describe("voice home wiring", () => {
     assert.match(page, /view === "classic"/);
     assert.match(home, /VOICE_PROMPT/);
     assert.match(home, /useVoiceRecorder/);
-    assert.doesNotMatch(home, /fetch\s*\(/);
-    assert.doesNotMatch(home, /openai/i);
+    assert.match(home, /transcribing/);
+    assert.match(home, /transcript_ready/);
+    assert.match(home, /uploadRecordingForTranscription/);
+    assert.match(home, /Here&apos;s what we heard|Here's what we heard/);
+    assert.doesNotMatch(home, /fetch\s*\(\s*["'`]\/api\/chat/);
+    assert.doesNotMatch(home, /\/api\/speech/);
   });
 
   it("recorder hook uses getUserMedia and MediaRecorder only", () => {
@@ -72,6 +131,13 @@ describe("voice home wiring", () => {
     assert.match(source, /MAX_RECORDING_MS/);
     assert.match(source, /revokeObjectURL/);
     assert.doesNotMatch(source, /openai/i);
-    assert.doesNotMatch(source, /fetch\s*\(/);
+    assert.doesNotMatch(source, /\/api\/chat/);
+  });
+
+  it("successful transcription path clears temporary audio; failures keep pending recording", () => {
+    const home = readFileSync(join(__dirname, "../components/VoiceHome.tsx"), "utf8");
+    assert.match(home, /clearRecording\(\)/);
+    assert.match(home, /setPendingRecording\(target\)/);
+    assert.match(home, /retryUpload/);
   });
 });

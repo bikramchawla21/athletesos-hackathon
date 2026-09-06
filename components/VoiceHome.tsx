@@ -1,57 +1,154 @@
 "use client";
 
-import { errorCopy, formatElapsed, VOICE_PROMPT } from "@/lib/voice-recording";
-import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
+import { useRef, useState } from "react";
+import { uploadRecordingForTranscription } from "@/lib/upload-transcription";
+import {
+  errorCopy,
+  formatElapsed,
+  VOICE_PROMPT,
+  type VoiceRecordingErrorCode,
+  type VoiceRecordingState,
+} from "@/lib/voice-recording";
+import { useVoiceRecorder, type CompletedRecording } from "@/hooks/useVoiceRecorder";
 
 type VoiceHomeProps = {
-  /** Reserved for next Agent pass (STT → chat). */
   workspaceId: string;
 };
 
+type FlowOverlay = "none" | "transcribing" | "transcript_ready" | "flow_error";
+
 /**
  * Voice-first athlete home.
- * Exposes completed recording via useVoiceRecorder().recording.file for the next STT pass.
+ * Flow: idle → listening → stop → transcribing → transcript_ready
+ * Transcript is shown for verification only; not sent into AthleteOS intelligence yet.
+ *
+ * Raw-audio lifecycle (client):
+ * 1. Blob/object URL while recording / pending upload
+ * 2. multipart upload to /api/transcribe
+ * 3. on success: revoke URL + drop Blob/File
+ * 4. on failure: keep local recording for one-tap retry
  */
 export default function VoiceHome({ workspaceId }: VoiceHomeProps) {
+  const [overlay, setOverlay] = useState<FlowOverlay>("none");
+  const [transcript, setTranscript] = useState<string | null>(null);
+  const [flowError, setFlowError] = useState<VoiceRecordingErrorCode | null>(null);
+  const [pendingRecording, setPendingRecording] = useState<CompletedRecording | null>(null);
+  const uploadTokenRef = useRef(0);
+
   const {
-    state,
+    state: recorderState,
     elapsedMs,
-    errorCode,
-    recording,
+    errorCode: recorderError,
     start,
     stop,
     cancel,
     retry,
     clearRecording,
-  } = useVoiceRecorder();
+  } = useVoiceRecorder({
+    onRecordingComplete: (recording) => {
+      setPendingRecording(recording);
+      void runTranscribe(recording);
+    },
+  });
 
-  // Keep workspaceId referenced so the next pass can wire STT without prop churn.
-  void workspaceId;
+  async function runTranscribe(target: CompletedRecording) {
+    const token = ++uploadTokenRef.current;
+    setOverlay("transcribing");
+    setFlowError(null);
+    setTranscript(null);
+
+    const result = await uploadRecordingForTranscription({
+      file: target.file,
+      workspaceId,
+    });
+
+    if (token !== uploadTokenRef.current) return;
+
+    if (!result.ok) {
+      setPendingRecording(target);
+      setFlowError(
+        result.code === "empty_transcript"
+          ? "empty_transcript"
+          : result.code === "auth_failed"
+            ? "auth_failed"
+            : result.code === "stt_failed"
+              ? "stt_failed"
+              : "upload_failed",
+      );
+      setOverlay("flow_error");
+      return;
+    }
+
+    clearRecording();
+    setPendingRecording(null);
+    setTranscript(result.text);
+    setOverlay("transcript_ready");
+  }
+
+  function recordAgain() {
+    uploadTokenRef.current += 1;
+    setTranscript(null);
+    setFlowError(null);
+    setPendingRecording(null);
+    setOverlay("none");
+    clearRecording();
+    retry();
+  }
+
+  function retryUpload() {
+    if (!pendingRecording) {
+      recordAgain();
+      return;
+    }
+    void runTranscribe(pendingRecording);
+  }
+
+  function beginTalk() {
+    setOverlay("none");
+    setTranscript(null);
+    setFlowError(null);
+    void start();
+  }
+
+  const phase: VoiceRecordingState =
+    overlay === "transcribing"
+      ? "transcribing"
+      : overlay === "transcript_ready"
+        ? "transcript_ready"
+        : overlay === "flow_error"
+          ? "error"
+          : recorderState === "recorded"
+            ? "transcribing"
+            : recorderState;
+
+  const displayError = flowError ?? recorderError;
+  const showIdle = phase === "idle" || phase === "requesting_permission";
+  const showRecorderError = phase === "error" && overlay !== "flow_error";
 
   return (
-    <main className="voice-shell" data-voice-state={state}>
+    <main className="voice-shell" data-voice-state={phase}>
       <div className="voice-stage">
         <span className="eyebrow">AthleteOS</span>
 
-        {state === "idle" || state === "requesting_permission" ? (
+        {showIdle ? (
           <>
             <h1 className="voice-prompt">{VOICE_PROMPT}</h1>
             <button
               type="button"
               className="voice-mic"
               aria-label="Tap to talk"
-              disabled={state === "requesting_permission"}
-              onClick={() => void start()}
+              disabled={phase === "requesting_permission"}
+              onClick={beginTalk}
             >
               <MicIcon />
             </button>
             <p className="voice-hint">
-              {state === "requesting_permission" ? "Allow microphone access…" : "Tap to talk"}
+              {phase === "requesting_permission" ? "Allow microphone access…" : "Tap to talk"}
             </p>
           </>
         ) : null}
 
-        {state === "listening" ? (
+        {phase === "listening" ? (
           <>
             <p className="voice-status listening">Listening…</p>
             <p className="voice-timer" aria-live="polite">
@@ -71,51 +168,59 @@ export default function VoiceHome({ workspaceId }: VoiceHomeProps) {
           </>
         ) : null}
 
-        {state === "recorded" && recording ? (
+        {phase === "transcribing" ? (
           <>
-            <p className="voice-status">Got it.</p>
-            <p className="voice-hint">
-              {formatElapsed(recording.durationMs)} · temporary local recording
+            <p className="voice-status listening" aria-live="polite">
+              Transcribing…
             </p>
-            <audio className="voice-playback" controls src={recording.objectUrl} preload="metadata" />
+            <p className="voice-hint">Sending your recording securely</p>
+            <div className="voice-mic voice-mic-active voice-mic-busy" aria-hidden="true">
+              <MicIcon />
+            </div>
+          </>
+        ) : null}
+
+        {phase === "transcript_ready" && transcript ? (
+          <>
+            <p className="voice-status">Here&apos;s what we heard:</p>
+            <p className="voice-transcript" data-testid="voice-transcript">
+              {transcript}
+            </p>
             <div className="voice-actions">
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => {
-                  clearRecording();
-                  retry();
-                }}
-              >
+              <button type="button" className="secondary" onClick={recordAgain}>
                 Record again
-              </button>
-              <button
-                type="button"
-                className="primary"
-                disabled
-                title="Transcription arrives in the next pilot pass"
-              >
-                Continue
               </button>
             </div>
             <p className="voice-dev-note">
-              Next pass will upload <code>recording.file</code> for transcription.
+              Temporary preview — next pass sends this text into the existing chat pipeline.
             </p>
           </>
         ) : null}
 
-        {state === "error" ? (
+        {phase === "error" ? (
           <>
             <p className="voice-status" role="alert">
-              {errorCopy(errorCode ?? "unknown")}
+              {errorCopy(displayError ?? "unknown")}
             </p>
-            <button type="button" className="voice-mic" aria-label="Try again" onClick={retry}>
-              <MicIcon />
-            </button>
             <div className="voice-actions">
-              <button type="button" className="primary" onClick={retry}>
-                Try again
-              </button>
+              {overlay === "flow_error" && pendingRecording && displayError !== "empty_transcript" ? (
+                <button type="button" className="primary" onClick={retryUpload}>
+                  Try again
+                </button>
+              ) : (
+                <button type="button" className="primary" onClick={recordAgain}>
+                  Try again
+                </button>
+              )}
+              {overlay === "flow_error" && pendingRecording ? (
+                <button type="button" className="secondary" onClick={recordAgain}>
+                  Record again
+                </button>
+              ) : showRecorderError ? (
+                <button type="button" className="voice-mic" aria-label="Try again" onClick={recordAgain}>
+                  <MicIcon />
+                </button>
+              ) : null}
             </div>
           </>
         ) : null}
