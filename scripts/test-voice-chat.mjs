@@ -171,10 +171,11 @@ describe("voice chat wiring + authz invariants", () => {
     assert.match(home, /sendVoiceChatTurn/);
     assert.match(home, /requestVoiceMemoryCheckpoint/);
     assert.match(home, /thinking/);
-    assert.match(home, /response_ready/);
+    assert.match(home, /speaking/);
+    assert.match(home, /ready_again/);
     assert.match(home, /clientMessageId/);
     assert.match(home, /pendingChat/);
-    assert.doesNotMatch(home, /\/api\/speech/);
+    assert.match(home, /fetchSpeechAudio/);
     assert.match(page, /conversationId=\{conversation\.id\}/);
     assert.match(page, /getLatestConversation/);
     assert.match(route, /voice_pwa/);

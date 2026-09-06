@@ -19,7 +19,8 @@ export type VoiceRecordingState =
   | "recorded"
   | "transcribing"
   | "thinking"
-  | "response_ready"
+  | "speaking"
+  | "ready_again"
   | "error";
 
 export type VoiceRecordingErrorCode =
@@ -33,6 +34,7 @@ export type VoiceRecordingErrorCode =
   | "auth_failed"
   | "chat_failed"
   | "conversation_failed"
+  | "speech_failed"
   | "unknown";
 
 const PREFERRED_MIME_TYPES = [
@@ -85,6 +87,8 @@ export function errorCopy(code: VoiceRecordingErrorCode): string {
       return "AthleteOS couldn’t continue. Try again — you don’t need to re-record.";
     case "conversation_failed":
       return "Couldn't start the conversation. Try again.";
+    case "speech_failed":
+      return "Couldn't play AthleteOS. Retry audio — your reply is saved.";
     default:
       return "Something went wrong. Try again.";
   }

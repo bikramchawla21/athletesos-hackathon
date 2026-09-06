@@ -15,9 +15,10 @@
     "test:voice-home": "node --experimental-strip-types --test scripts/test-voice-home.mjs",
     "test:transcribe": "node --experimental-strip-types --test scripts/test-transcribe.mjs",
     "test:voice-chat": "node --experimental-strip-types --test scripts/test-voice-chat.mjs",
+    "test:speech": "node --experimental-strip-types --test scripts/test-speech.mjs",
     "test:authz": "node --test scripts/test-authz.mjs",
     "test:coach": "node --test scripts/test-coach.mjs",
-    "test": "npm run test:insights && npm run test:hardening && npm run test:memory && npm run test:memory-isolation && npm run test:voice-home && npm run test:transcribe && npm run test:voice-chat && npm run test:authz && npm run test:coach",
+    "test": "npm run test:insights && npm run test:hardening && npm run test:memory && npm run test:memory-isolation && npm run test:voice-home && npm run test:transcribe && npm run test:voice-chat && npm run test:speech && npm run test:authz && npm run test:coach",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio"

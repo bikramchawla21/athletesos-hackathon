@@ -307,6 +307,11 @@ h1 { margin: 0 0 28px; font-family: Georgia, "Times New Roman", serif; font-size
   color: var(--ink);
   white-space: pre-wrap;
 }
+.voice-reply-secondary {
+  margin-bottom: 12px;
+  font-size: clamp(0.95rem, 2.2vw, 1.1rem);
+  color: var(--muted);
+}
 .voice-mic-busy {
   pointer-events: none;
   opacity: 0.85;

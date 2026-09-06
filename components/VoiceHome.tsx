@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createMessageId } from "@/lib/message-id.mjs";
 import {
   looksLikeAthleteCorrection,
   shouldSyncMemoryCheckpoint,
 } from "@/lib/memory-guards.mjs";
+import { fetchSpeechAudio } from "@/lib/fetch-speech";
 import { uploadRecordingForTranscription } from "@/lib/upload-transcription";
 import {
   ensureActiveConversation,
@@ -31,7 +32,8 @@ type FlowOverlay =
   | "none"
   | "transcribing"
   | "thinking"
-  | "response_ready"
+  | "speaking"
+  | "ready_again"
   | "flow_error";
 
 type PendingChat = {
@@ -41,10 +43,9 @@ type PendingChat = {
 
 /**
  * Voice-first athlete home.
- * Flow: idle → listening → transcribing → thinking → response_ready → ready again
+ * Flow: idle → listening → transcribing → thinking → speaking → ready_again
  *
- * Transcript auto-enters existing /api/chat + AthleteMemory (same path as typed chat).
- * TTS is intentionally not implemented in this pass.
+ * Chat text remains canonical. TTS is ephemeral output only.
  */
 export default function VoiceHome({
   workspaceId,
@@ -58,10 +59,16 @@ export default function VoiceHome({
   const [pendingRecording, setPendingRecording] = useState<CompletedRecording | null>(null);
   const [pendingChat, setPendingChat] = useState<PendingChat | null>(null);
   const [conversationId, setConversationId] = useState(initialConversationId);
+  const [needsTapToPlay, setNeedsTapToPlay] = useState(false);
+  const [speechFailed, setSpeechFailed] = useState(false);
+
   const uploadTokenRef = useRef(0);
   const chatInFlightRef = useRef(false);
+  const speechInFlightRef = useRef(false);
   const userTurnCountRef = useRef(initialUserTurnCount);
   const lastSyncedUserTurnCountRef = useRef(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
 
   const {
     state: recorderState,
@@ -79,8 +86,40 @@ export default function VoiceHome({
     },
   });
 
+  function cleanupPlayback() {
+    try {
+      if (audioRef.current) {
+        audioRef.current.onended = null;
+        audioRef.current.onerror = null;
+        audioRef.current.pause();
+        audioRef.current.removeAttribute("src");
+        audioRef.current.load();
+      }
+    } catch {
+      // ignore
+    }
+    audioRef.current = null;
+    if (objectUrlRef.current) {
+      try {
+        URL.revokeObjectURL(objectUrlRef.current);
+      } catch {
+        // ignore
+      }
+      objectUrlRef.current = null;
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      cleanupPlayback();
+    };
+  }, []);
+
   async function runTranscribe(target: CompletedRecording) {
     const token = ++uploadTokenRef.current;
+    cleanupPlayback();
+    setNeedsTapToPlay(false);
+    setSpeechFailed(false);
     setOverlay("transcribing");
     setFlowError(null);
     setAssistantReply(null);
@@ -107,6 +146,7 @@ export default function VoiceHome({
       return;
     }
 
+    // Mic tracks already released by recorder finalize before this upload.
     clearRecording();
     setPendingRecording(null);
     const transcript = result.text;
@@ -122,6 +162,8 @@ export default function VoiceHome({
     const token = ++uploadTokenRef.current;
     setOverlay("thinking");
     setFlowError(null);
+    setNeedsTapToPlay(false);
+    setSpeechFailed(false);
 
     try {
       const ensured = await ensureActiveConversation({
@@ -157,9 +199,7 @@ export default function VoiceHome({
 
       if (!chat.ok) {
         setPendingChat(turn);
-        setFlowError(
-          chat.code === "auth_failed" ? "auth_failed" : "chat_failed",
-        );
+        setFlowError(chat.code === "auth_failed" ? "auth_failed" : "chat_failed");
         setOverlay("flow_error");
         return;
       }
@@ -167,7 +207,6 @@ export default function VoiceHome({
       userTurnCountRef.current += 1;
       setPendingChat(null);
       setAssistantReply(chat.reply);
-      setOverlay("response_ready");
 
       const userTurns = userTurnCountRef.current;
       const correction = looksLikeAthleteCorrection(turn.transcript);
@@ -186,19 +225,110 @@ export default function VoiceHome({
         });
         lastSyncedUserTurnCountRef.current = userTurns;
       }
+
+      await runSpeech(chat.reply, token);
     } finally {
       chatInFlightRef.current = false;
     }
   }
 
+  async function runSpeech(text: string, token = uploadTokenRef.current) {
+    if (!text.trim()) {
+      setOverlay("ready_again");
+      return;
+    }
+    if (speechInFlightRef.current) return;
+    speechInFlightRef.current = true;
+    setOverlay("speaking");
+    setNeedsTapToPlay(false);
+    setSpeechFailed(false);
+    cleanupPlayback();
+
+    try {
+      const speech = await fetchSpeechAudio({ text, workspaceId });
+      if (token !== uploadTokenRef.current) return;
+
+      if (!speech.ok) {
+        setSpeechFailed(true);
+        setFlowError(speech.code === "auth_failed" ? "auth_failed" : "speech_failed");
+        setOverlay("ready_again");
+        return;
+      }
+
+      const url = URL.createObjectURL(speech.blob);
+      objectUrlRef.current = url;
+      const audio = new Audio(url);
+      audio.preload = "auto";
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        cleanupPlayback();
+        setNeedsTapToPlay(false);
+        setSpeechFailed(false);
+        setOverlay("ready_again");
+      };
+      audio.onerror = () => {
+        cleanupPlayback();
+        setSpeechFailed(true);
+        setFlowError("speech_failed");
+        setOverlay("ready_again");
+      };
+
+      try {
+        await audio.play();
+      } catch {
+        // iOS / browser autoplay restriction after mic session.
+        setNeedsTapToPlay(true);
+        setOverlay("ready_again");
+      }
+    } finally {
+      speechInFlightRef.current = false;
+    }
+  }
+
+  function stopSpeaking() {
+    uploadTokenRef.current += 1;
+    speechInFlightRef.current = false;
+    cleanupPlayback();
+    setNeedsTapToPlay(false);
+    setSpeechFailed(false);
+    setOverlay("ready_again");
+  }
+
+  function retryAudio() {
+    if (!assistantReply) return;
+    setFlowError(null);
+    void runSpeech(assistantReply);
+  }
+
+  async function tapToHear() {
+    if (!assistantReply) return;
+    setNeedsTapToPlay(false);
+    setOverlay("speaking");
+    const audio = audioRef.current;
+    if (audio) {
+      try {
+        await audio.play();
+        return;
+      } catch {
+        // fall through to regenerate
+      }
+    }
+    void runSpeech(assistantReply);
+  }
+
   function recordAgain() {
     uploadTokenRef.current += 1;
     chatInFlightRef.current = false;
+    speechInFlightRef.current = false;
+    cleanupPlayback();
     setAssistantReply(null);
     setLastTranscript(null);
     setFlowError(null);
     setPendingRecording(null);
     setPendingChat(null);
+    setNeedsTapToPlay(false);
+    setSpeechFailed(false);
     setOverlay("none");
     clearRecording();
     retry();
@@ -225,14 +355,17 @@ export default function VoiceHome({
   }
 
   function beginTalk() {
-    if (overlay === "thinking" || overlay === "transcribing") return;
+    if (overlay === "thinking" || overlay === "transcribing" || overlay === "speaking") return;
     uploadTokenRef.current += 1;
     chatInFlightRef.current = false;
+    speechInFlightRef.current = false;
+    cleanupPlayback();
+    setNeedsTapToPlay(false);
+    setSpeechFailed(false);
     setOverlay("none");
     setFlowError(null);
     setPendingRecording(null);
     setPendingChat(null);
-    // Keep last assistant reply visible until new speech starts; cleared on next STT.
     void start();
   }
 
@@ -241,19 +374,20 @@ export default function VoiceHome({
       ? "transcribing"
       : overlay === "thinking"
         ? "thinking"
-        : overlay === "response_ready"
-          ? "response_ready"
-          : overlay === "flow_error"
-            ? "error"
-            : recorderState === "recorded"
-              ? "transcribing"
-              : recorderState;
+        : overlay === "speaking"
+          ? "speaking"
+          : overlay === "ready_again"
+            ? "ready_again"
+            : overlay === "flow_error"
+              ? "error"
+              : recorderState === "recorded"
+                ? "transcribing"
+                : recorderState;
 
   const displayError = flowError ?? recorderError;
   const showIdle = phase === "idle" || phase === "requesting_permission";
-  const showReplySurface =
-    Boolean(assistantReply) &&
-    (phase === "response_ready" || showIdle);
+  const showReadyAgain =
+    phase === "ready_again" || (showIdle && Boolean(assistantReply) && !pendingChat);
   const canRetryChat =
     overlay === "flow_error" && Boolean(pendingChat) && !pendingRecording;
   const canRetryUpload =
@@ -282,7 +416,7 @@ export default function VoiceHome({
           </>
         ) : null}
 
-        {showReplySurface && assistantReply ? (
+        {showReadyAgain && assistantReply ? (
           <>
             <p className="voice-status">AthleteOS</p>
             <p className="voice-reply" data-testid="voice-reply">
@@ -291,18 +425,36 @@ export default function VoiceHome({
             {lastTranscript ? (
               <p className="voice-dev-note">You said: {lastTranscript}</p>
             ) : null}
-            <button
-              type="button"
-              className="voice-mic"
-              aria-label="Tap to talk"
-              disabled={phase === "requesting_permission"}
-              onClick={beginTalk}
-            >
-              <MicIcon />
-            </button>
-            <p className="voice-hint">
-              {phase === "requesting_permission" ? "Allow microphone access…" : "Tap to talk"}
-            </p>
+            {needsTapToPlay ? (
+              <div className="voice-actions">
+                <button type="button" className="primary" onClick={() => void tapToHear()}>
+                  Tap to hear AthleteOS
+                </button>
+              </div>
+            ) : null}
+            {speechFailed && !needsTapToPlay ? (
+              <div className="voice-actions">
+                <button type="button" className="primary" onClick={retryAudio}>
+                  Retry audio
+                </button>
+              </div>
+            ) : null}
+            {!needsTapToPlay ? (
+              <>
+                <button
+                  type="button"
+                  className="voice-mic"
+                  aria-label="Tap to talk"
+                  disabled={phase === "requesting_permission"}
+                  onClick={beginTalk}
+                >
+                  <MicIcon />
+                </button>
+                <p className="voice-hint">
+                  {phase === "requesting_permission" ? "Allow microphone access…" : "Tap to talk"}
+                </p>
+              </>
+            ) : null}
           </>
         ) : null}
 
@@ -348,6 +500,27 @@ export default function VoiceHome({
             ) : null}
             <div className="voice-mic voice-mic-active voice-mic-busy" aria-hidden="true">
               <MicIcon />
+            </div>
+          </>
+        ) : null}
+
+        {phase === "speaking" ? (
+          <>
+            <p className="voice-status listening" aria-live="polite">
+              AthleteOS is speaking…
+            </p>
+            {assistantReply ? (
+              <p className="voice-reply voice-reply-secondary" data-testid="voice-reply">
+                {assistantReply}
+              </p>
+            ) : null}
+            <div className="voice-mic voice-mic-active voice-mic-busy" aria-hidden="true">
+              <MicIcon />
+            </div>
+            <div className="voice-actions">
+              <button type="button" className="secondary" onClick={stopSpeaking}>
+                Stop
+              </button>
             </div>
           </>
         ) : null}

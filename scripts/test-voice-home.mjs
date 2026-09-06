@@ -119,10 +119,12 @@ describe("voice home wiring", () => {
     assert.match(home, /useVoiceRecorder/);
     assert.match(home, /transcribing/);
     assert.match(home, /thinking/);
-    assert.match(home, /response_ready/);
+    assert.match(home, /speaking/);
+    assert.match(home, /ready_again/);
     assert.match(home, /uploadRecordingForTranscription/);
     assert.match(home, /sendVoiceChatTurn/);
-    assert.doesNotMatch(home, /\/api\/speech/);
+    assert.match(home, /fetchSpeechAudio/);
+    assert.doesNotMatch(home, /response_ready/);
   });
 
   it("recorder hook uses getUserMedia and MediaRecorder only", () => {
@@ -142,5 +144,6 @@ describe("voice home wiring", () => {
     assert.match(home, /setPendingChat/);
     assert.match(home, /retryChat/);
     assert.match(home, /retryUpload/);
+    assert.match(home, /retryAudio/);
   });
 });

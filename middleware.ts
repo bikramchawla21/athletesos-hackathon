@@ -13,6 +13,7 @@ const isProtectedRoute = createRouteMatcher([
   "/api/patterns(.*)",
   "/api/notifications(.*)",
   "/api/transcribe(.*)",
+  "/api/speech(.*)",
 ]);
 
 const clerkHandler = clerkMiddleware(async (auth, request) => {
