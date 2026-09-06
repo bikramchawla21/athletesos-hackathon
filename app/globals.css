@@ -299,6 +299,14 @@ h1 { margin: 0 0 28px; font-family: Georgia, "Times New Roman", serif; font-size
   white-space: pre-wrap;
   text-align: left;
 }
+.voice-reply {
+  margin: 8px 0 18px;
+  max-width: 34rem;
+  font-size: clamp(1.15rem, 2.6vw, 1.35rem);
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
 .voice-mic-busy {
   pointer-events: none;
   opacity: 0.85;

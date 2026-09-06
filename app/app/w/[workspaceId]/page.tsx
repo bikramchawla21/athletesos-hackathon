@@ -55,6 +55,20 @@ export default async function WorkspacePage({ params, searchParams }: PageProps)
   }
 
   if (!classicView) {
+    let conversation = await getLatestConversation(workspaceId, "athlete_discovery");
+    if (!conversation) {
+      const started = await startConversation({
+        workspaceId,
+        personId: access.person.id,
+        kind: "athlete_discovery",
+        visibility: "athlete_private",
+        withOpeningMessage: true,
+      });
+      conversation = started.conversation;
+    }
+    const dbMessages = await listMessages(conversation.id);
+    const initialUserTurnCount = dbMessages.filter((m) => m.role === "user").length;
+
     return (
       <>
         <div className="voice-chrome">
@@ -63,7 +77,11 @@ export default async function WorkspacePage({ params, searchParams }: PageProps)
             History
           </Link>
         </div>
-        <VoiceHome workspaceId={workspaceId} />
+        <VoiceHome
+          workspaceId={workspaceId}
+          conversationId={conversation.id}
+          initialUserTurnCount={initialUserTurnCount}
+        />
       </>
     );
   }

@@ -147,6 +147,14 @@ describe("discovery prompt question-only default", () => {
     assert.match(CHAT_REPAIR_INSTRUCTIONS, /ONE precise question only/);
     assert.doesNotMatch(DISCOVERY_INSTRUCTIONS, /Reflect and ask \(default\)/);
   });
+
+  it("voice_pwa instructions are additive and do not rewrite the default discovery prompt", async () => {
+    const { VOICE_PWA_INSTRUCTIONS, VOICE_PWA_MAX_OUTPUT_TOKENS } = await import("../lib/chat.mjs");
+    assert.match(VOICE_PWA_INSTRUCTIONS, /VOICE PWA MODE/);
+    assert.match(VOICE_PWA_INSTRUCTIONS, /athlete should talk more/i);
+    assert.doesNotMatch(DISCOVERY_INSTRUCTIONS, /VOICE PWA MODE/);
+    assert.ok(VOICE_PWA_MAX_OUTPUT_TOKENS > 0 && VOICE_PWA_MAX_OUTPUT_TOKENS <= 200);
+  });
 });
 
 describe("chat demo and honest failures", () => {

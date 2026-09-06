@@ -109,18 +109,19 @@ describe("uploadRecordingForTranscription", () => {
 });
 
 describe("voice home wiring", () => {
-  it("athlete workspace defaults to VoiceHome with locked prompt", () => {
+  it("athlete workspace defaults to VoiceHome with locked prompt and chat handoff", () => {
     const page = readFileSync(join(__dirname, "../app/app/w/[workspaceId]/page.tsx"), "utf8");
     const home = readFileSync(join(__dirname, "../components/VoiceHome.tsx"), "utf8");
     assert.match(page, /VoiceHome/);
     assert.match(page, /view === "classic"/);
+    assert.match(page, /conversationId=\{conversation\.id\}/);
     assert.match(home, /VOICE_PROMPT/);
     assert.match(home, /useVoiceRecorder/);
     assert.match(home, /transcribing/);
-    assert.match(home, /transcript_ready/);
+    assert.match(home, /thinking/);
+    assert.match(home, /response_ready/);
     assert.match(home, /uploadRecordingForTranscription/);
-    assert.match(home, /Here&apos;s what we heard|Here's what we heard/);
-    assert.doesNotMatch(home, /fetch\s*\(\s*["'`]\/api\/chat/);
+    assert.match(home, /sendVoiceChatTurn/);
     assert.doesNotMatch(home, /\/api\/speech/);
   });
 
@@ -134,10 +135,12 @@ describe("voice home wiring", () => {
     assert.doesNotMatch(source, /\/api\/chat/);
   });
 
-  it("successful transcription path clears temporary audio; failures keep pending recording", () => {
+  it("successful transcription path clears temporary audio; chat failures keep pending transcript", () => {
     const home = readFileSync(join(__dirname, "../components/VoiceHome.tsx"), "utf8");
     assert.match(home, /clearRecording\(\)/);
     assert.match(home, /setPendingRecording\(target\)/);
+    assert.match(home, /setPendingChat/);
+    assert.match(home, /retryChat/);
     assert.match(home, /retryUpload/);
   });
 });

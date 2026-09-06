@@ -18,7 +18,8 @@ export type VoiceRecordingState =
   | "listening"
   | "recorded"
   | "transcribing"
-  | "transcript_ready"
+  | "thinking"
+  | "response_ready"
   | "error";
 
 export type VoiceRecordingErrorCode =
@@ -30,6 +31,8 @@ export type VoiceRecordingErrorCode =
   | "empty_transcript"
   | "stt_failed"
   | "auth_failed"
+  | "chat_failed"
+  | "conversation_failed"
   | "unknown";
 
 const PREFERRED_MIME_TYPES = [
@@ -78,6 +81,10 @@ export function errorCopy(code: VoiceRecordingErrorCode): string {
       return "Couldn't send that. Try again.";
     case "auth_failed":
       return "Sign in again to keep talking.";
+    case "chat_failed":
+      return "AthleteOS couldn’t continue. Try again — you don’t need to re-record.";
+    case "conversation_failed":
+      return "Couldn't start the conversation. Try again.";
     default:
       return "Something went wrong. Try again.";
   }

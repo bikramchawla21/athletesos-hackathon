@@ -27,6 +27,8 @@ const workspaceChatSchema = z.object({
   mode: z.enum(["chat", "reopen"]).optional().default("chat"),
   clientMessageId: z.string().min(1).max(120).optional(),
   content: z.string().min(1).max(8000).optional(),
+  /** Additive voice-PWA prompt mode. Omit for default typed/web behavior. */
+  client: z.enum(["voice_pwa"]).optional(),
 });
 
 export async function POST(request: Request) {
@@ -196,7 +198,10 @@ async function handleWorkspaceChat(json: unknown) {
     status: "started",
   });
 
-  const result = await generateChatReply(ctx.messages, { memory: ctx.memory });
+  const result = await generateChatReply(ctx.messages, {
+    memory: ctx.memory,
+    client: body.client ?? null,
+  });
 
   if (result.status >= 400) {
     await recordModelOperation({
