@@ -9,23 +9,25 @@ Operational guide for a 10–20 athlete voice PWA pilot. Not a product feature d
 | `DATABASE_URL` | Pooled Neon URL used by the running app (`db/client.ts`) |
 | `DATABASE_URL_UNPOOLED` | Direct Neon URL for Drizzle migrations |
 | `ATHLETEOS_ENV` | `development` \| `preview` \| `production` (falls back to `VERCEL_ENV` / `NODE_ENV`) |
-| `ATHLETEOS_ALLOW_PROD_MIGRATE` | Must be `1` to run migrations when env is production |
-| `ATHLETEOS_TREAT_NEON_AS_PILOT` | Optional: refuse migrate against any `neon.tech` URL unless allow flag set |
+| `ATHLETEOS_ALLOW_PROD_MIGRATE` | Temporary `1` to migrate when env is production — unset after success |
+| `ATHLETEOS_ALLOW_NEON_MIGRATE` | Temporary `1` to migrate a Neon URL from local/dev — unset after success |
 | `ALLOW_PILOT_WORKSPACE_RESET` | Must be `1` to allow hard workspace reset in production |
 
 **Rule:** local/dev and pilot/production must use **separate Neon projects**.  
 Tests under `scripts/test-*.mjs` are offline/static — they do **not** connect to Neon.
 
 ```bash
-# Local
+# Local non-Neon
 ATHLETEOS_ENV=development npm run db:migrate
 
-# Production/pilot (deliberate only)
+# Intentional Neon (local/dev branch) — temporary allow, then unset
+ATHLETEOS_ALLOW_NEON_MIGRATE=1 npm run db:migrate
+
+# Production/pilot Neon — temporary allow, then unset
 ATHLETEOS_ENV=production ATHLETEOS_ALLOW_PROD_MIGRATE=1 npm run db:migrate
 ```
 
-`npm run db:migrate` runs through `scripts/db-migrate-guard.mjs` (not raw `drizzle-kit migrate`).
-
+`npm run db:migrate` runs through `scripts/db-migrate-guard.mjs` (not raw `drizzle-kit migrate`). Neon URLs are refused unless an allow flag is set.
 ## Pilot cohort identification
 
 Column: `athlete_workspaces.pilot_marked_at` (nullable timestamp).

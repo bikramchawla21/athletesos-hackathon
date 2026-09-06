@@ -27,18 +27,17 @@ export function isWorkspaceResetAllowed(): boolean {
 }
 
 /**
- * Heuristic: Neon hostnames that look like the known pilot/production project
- * should not be migrated without an explicit override.
+ * Heuristic: Neon / production DBs must not be migrated casually.
+ * Prefer scripts/db-migrate-guard.mjs (blocks neon.tech unless allow flags set).
  */
 export function databaseUrlLooksSensitive(url: string): boolean {
   const value = url.trim().toLowerCase();
   if (!value) return false;
   if (process.env.ATHLETEOS_ALLOW_PROD_MIGRATE === "1") return false;
-  // Local / ephemeral Neon branches often include "ep-"; still require explicit
-  // ATHLETEOS_ENV=production + ALLOW for any migrate when env is production.
-  if (getAthleteOsEnv() === "production") return true;
-  if (value.includes("neon.tech") && process.env.ATHLETEOS_TREAT_NEON_AS_PILOT === "1") {
-    return true;
+  if (process.env.ATHLETEOS_ALLOW_NEON_MIGRATE === "1" && getAthleteOsEnv() !== "production") {
+    return false;
   }
+  if (getAthleteOsEnv() === "production") return true;
+  if (value.includes("neon.tech")) return true;
   return false;
 }

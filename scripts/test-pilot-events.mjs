@@ -64,18 +64,27 @@ describe("recordPilotEvent client", () => {
 });
 
 describe("env safety", () => {
-  it("treats production as sensitive for migrations", () => {
+  it("treats Neon URLs as sensitive unless explicitly allowed", () => {
     const prev = process.env.ATHLETEOS_ENV;
-    const allow = process.env.ATHLETEOS_ALLOW_PROD_MIGRATE;
-    process.env.ATHLETEOS_ENV = "production";
+    const allowProd = process.env.ATHLETEOS_ALLOW_PROD_MIGRATE;
+    const allowNeon = process.env.ATHLETEOS_ALLOW_NEON_MIGRATE;
+    process.env.ATHLETEOS_ENV = "development";
     delete process.env.ATHLETEOS_ALLOW_PROD_MIGRATE;
-    assert.equal(getAthleteOsEnv(), "production");
+    delete process.env.ATHLETEOS_ALLOW_NEON_MIGRATE;
+    assert.equal(getAthleteOsEnv(), "development");
+    assert.equal(databaseUrlLooksSensitive("postgresql://x.neon.tech/db"), true);
+    process.env.ATHLETEOS_ALLOW_NEON_MIGRATE = "1";
+    assert.equal(databaseUrlLooksSensitive("postgresql://x.neon.tech/db"), false);
+    process.env.ATHLETEOS_ENV = "production";
+    delete process.env.ATHLETEOS_ALLOW_NEON_MIGRATE;
     assert.equal(databaseUrlLooksSensitive("postgresql://x.neon.tech/db"), true);
     process.env.ATHLETEOS_ALLOW_PROD_MIGRATE = "1";
     assert.equal(databaseUrlLooksSensitive("postgresql://x.neon.tech/db"), false);
     process.env.ATHLETEOS_ENV = prev;
-    if (allow === undefined) delete process.env.ATHLETEOS_ALLOW_PROD_MIGRATE;
-    else process.env.ATHLETEOS_ALLOW_PROD_MIGRATE = allow;
+    if (allowProd === undefined) delete process.env.ATHLETEOS_ALLOW_PROD_MIGRATE;
+    else process.env.ATHLETEOS_ALLOW_PROD_MIGRATE = allowProd;
+    if (allowNeon === undefined) delete process.env.ATHLETEOS_ALLOW_NEON_MIGRATE;
+    else process.env.ATHLETEOS_ALLOW_NEON_MIGRATE = allowNeon;
   });
 
   it("blocks workspace reset in production without allow flag", () => {
