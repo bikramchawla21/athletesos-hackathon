@@ -182,6 +182,8 @@ export const athleteWorkspaces = pgTable(
         recoveryContext: 0,
         supportEnvironment: 0,
       }),
+    /** When set, workspace is an intentional pilot cohort member (not random signup). */
+    pilotMarkedAt: timestamp("pilot_marked_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
@@ -606,6 +608,28 @@ export const modelOperations = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("model_operations_workspace_idx").on(table.workspaceId)],
+);
+
+/**
+ * Pilot product analytics (separate from canonical athlete intelligence).
+ * Do not store transcripts or raw audio — only event names + opaque ids/metrics.
+ */
+export const pilotEvents = pgTable(
+  "pilot_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => athleteWorkspaces.id),
+    personId: uuid("person_id").references(() => people.id),
+    conversationId: uuid("conversation_id").references(() => conversations.id),
+    name: text("name").notNull(),
+    props: jsonb("props").$type<Record<string, unknown>>().notNull().default({}),
+    clientSessionId: text("client_session_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("pilot_events_workspace_created_idx").on(table.workspaceId, table.createdAt),
+    index("pilot_events_name_created_idx").on(table.name, table.createdAt),
+  ],
 );
 
 export const legacyImports = pgTable(

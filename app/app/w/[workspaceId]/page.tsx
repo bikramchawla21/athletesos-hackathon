@@ -68,6 +68,9 @@ export default async function WorkspacePage({ params, searchParams }: PageProps)
     }
     const dbMessages = await listMessages(conversation.id);
     const initialUserTurnCount = dbMessages.filter((m) => m.role === "user").length;
+    const lastAssistant = [...dbMessages].reverse().find((m) => m.role === "assistant");
+    const initialAssistantReply =
+      initialUserTurnCount > 0 && lastAssistant?.content ? lastAssistant.content : null;
 
     return (
       <>
@@ -81,6 +84,7 @@ export default async function WorkspacePage({ params, searchParams }: PageProps)
           workspaceId={workspaceId}
           conversationId={conversation.id}
           initialUserTurnCount={initialUserTurnCount}
+          initialAssistantReply={initialAssistantReply}
         />
       </>
     );

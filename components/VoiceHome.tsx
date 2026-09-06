@@ -19,6 +19,7 @@ import {
   sendVoiceChatTurn,
   submitVoiceInsightFamiliarity,
 } from "@/lib/voice-chat";
+import { recordPilotEvent } from "@/lib/pilot-events";
 import {
   errorCopy,
   formatElapsed,
@@ -32,6 +33,8 @@ type VoiceHomeProps = {
   workspaceId: string;
   conversationId: string;
   initialUserTurnCount?: number;
+  /** Last assistant text from DB — restores mid-session after refresh. */
+  initialAssistantReply?: string | null;
 };
 
 type FlowOverlay =
@@ -58,9 +61,14 @@ export default function VoiceHome({
   workspaceId,
   conversationId: initialConversationId,
   initialUserTurnCount = 0,
+  initialAssistantReply = null,
 }: VoiceHomeProps) {
-  const [overlay, setOverlay] = useState<FlowOverlay>("none");
-  const [assistantReply, setAssistantReply] = useState<string | null>(null);
+  const [overlay, setOverlay] = useState<FlowOverlay>(() =>
+    initialUserTurnCount > 0 && initialAssistantReply ? "ready_again" : "none",
+  );
+  const [assistantReply, setAssistantReply] = useState<string | null>(
+    () => (initialUserTurnCount > 0 ? initialAssistantReply : null),
+  );
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
   const [spokenInsight, setSpokenInsight] = useState<string | null>(null);
   const [flowError, setFlowError] = useState<VoiceRecordingErrorCode | null>(null);
@@ -74,6 +82,8 @@ export default function VoiceHome({
   const [feedbackSaved, setFeedbackSaved] = useState(false);
   const askedAnythingElseRef = useRef(false);
   const [sessionFinished, setSessionFinished] = useState(false);
+  const sessionStartedRef = useRef(false);
+  const turnStartedAtRef = useRef<number | null>(null);
 
   const uploadTokenRef = useRef(0);
   const chatInFlightRef = useRef(false);
@@ -130,6 +140,45 @@ export default function VoiceHome({
     };
   }, []);
 
+  useEffect(() => {
+    if (initialUserTurnCount > 0 && initialAssistantReply) {
+      recordPilotEvent({
+        name: "session_recovered",
+        workspaceId,
+        conversationId: initialConversationId,
+        props: { userTurnCount: initialUserTurnCount },
+      });
+    }
+  }, [initialAssistantReply, initialConversationId, initialUserTurnCount, workspaceId]);
+
+  useEffect(() => {
+    function onPageHide() {
+      if (sessionFinished || overlay === "finished") return;
+      if (userTurnCountRef.current < 1) return;
+      recordPilotEvent({
+        name: "session_interrupted",
+        workspaceId,
+        conversationId,
+        props: {
+          userTurnCount: userTurnCountRef.current,
+          overlay,
+        },
+      });
+    }
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [conversationId, overlay, sessionFinished, workspaceId]);
+
+  function ensureSessionStarted(activeConversationId: string) {
+    if (sessionStartedRef.current) return;
+    sessionStartedRef.current = true;
+    recordPilotEvent({
+      name: "session_started",
+      workspaceId,
+      conversationId: activeConversationId,
+    });
+  }
+
   async function runTranscribe(target: CompletedRecording) {
     const token = ++uploadTokenRef.current;
     cleanupPlayback();
@@ -139,6 +188,9 @@ export default function VoiceHome({
     setOverlay("transcribing");
     setFlowError(null);
     setAssistantReply(null);
+    // Latency marker for pilot metrics (event handler, not render).
+    // eslint-disable-next-line react-hooks/purity -- event-handler timestamp
+    turnStartedAtRef.current = Date.now();
 
     const result = await uploadRecordingForTranscription({
       file: target.file,
@@ -159,6 +211,12 @@ export default function VoiceHome({
               : "upload_failed",
       );
       setOverlay("flow_error");
+      recordPilotEvent({
+        name: "transcription_failed",
+        workspaceId,
+        conversationId,
+        props: { code: result.code },
+      });
       return;
     }
 
@@ -166,6 +224,12 @@ export default function VoiceHome({
     setPendingRecording(null);
     const transcript = result.text;
     setLastTranscript(transcript);
+    recordPilotEvent({
+      name: "transcription_succeeded",
+      workspaceId,
+      conversationId,
+      props: { charCount: transcript.length },
+    });
     const clientMessageId = createMessageId();
     setPendingChat({ transcript, clientMessageId });
     await runChat({ transcript, clientMessageId });
@@ -222,6 +286,26 @@ export default function VoiceHome({
       userTurnCountRef.current += 1;
       setPendingChat(null);
       setAssistantReply(chat.reply);
+      recordPilotEvent({
+        name: "message_persisted",
+        workspaceId,
+        conversationId: ensured.conversationId,
+        props: {
+          userTurnCount: userTurnCountRef.current,
+          clientMessageId: turn.clientMessageId,
+        },
+      });
+      recordPilotEvent({
+        name: "assistant_response_generated",
+        workspaceId,
+        conversationId: ensured.conversationId,
+        props: {
+          replyChars: chat.reply.length,
+          latencyMs: turnStartedAtRef.current
+            ? Date.now() - turnStartedAtRef.current
+            : undefined,
+        },
+      });
       if (looksLikeAnythingElsePrompt(chat.reply)) {
         askedAnythingElseRef.current = true;
       }
@@ -298,6 +382,22 @@ export default function VoiceHome({
 
       setPatternId(insights.patternId);
       setSessionFinished(true);
+      recordPilotEvent({
+        name: "insight_generated",
+        workspaceId,
+        conversationId: activeConversationId,
+        props: {
+          alreadyFinalized: Boolean(insights.alreadyFinalized),
+          hasPattern: Boolean(insights.patternId),
+          hasSynthesis: Boolean(insights.spokenSynthesis),
+        },
+      });
+      recordPilotEvent({
+        name: "session_completed",
+        workspaceId,
+        conversationId: activeConversationId,
+        props: { userTurnCount: userTurnCountRef.current },
+      });
       void requestVoiceMemoryCheckpoint({
         workspaceId,
         conversationId: activeConversationId,
@@ -346,6 +446,12 @@ export default function VoiceHome({
           setFlowError(speech.code === "auth_failed" ? "auth_failed" : "speech_failed");
           setOverlay("ready_again");
         }
+        recordPilotEvent({
+          name: "tts_failed",
+          workspaceId,
+          conversationId,
+          props: { mode, code: speech.code },
+        });
         return;
       }
 
@@ -358,6 +464,17 @@ export default function VoiceHome({
       audio.onended = () => {
         cleanupPlayback();
         setNeedsTapToPlay(false);
+        recordPilotEvent({
+          name: "tts_succeeded",
+          workspaceId,
+          conversationId,
+          props: {
+            mode,
+            latencyMs: turnStartedAtRef.current
+              ? Date.now() - turnStartedAtRef.current
+              : undefined,
+          },
+        });
         if (insightAudioModeRef.current) {
           setInsightSpeechFailed(false);
           setOverlay("finished");
@@ -368,6 +485,12 @@ export default function VoiceHome({
       };
       audio.onerror = () => {
         cleanupPlayback();
+        recordPilotEvent({
+          name: "tts_failed",
+          workspaceId,
+          conversationId,
+          props: { mode, code: "playback_error" },
+        });
         if (insightAudioModeRef.current) {
           setInsightSpeechFailed(true);
           setOverlay("finished");
@@ -442,6 +565,12 @@ export default function VoiceHome({
       workspaceId,
       patternId,
       answer,
+    });
+    recordPilotEvent({
+      name: "insight_feedback",
+      workspaceId,
+      conversationId,
+      props: { answer, patternId },
     });
     setFeedbackSaved(true);
   }
@@ -520,6 +649,7 @@ export default function VoiceHome({
     setAssistantReply(null);
     setLastTranscript(null);
 
+    let activeId = conversationId;
     if (sessionFinished || overlay === "finished") {
       const created = await ensureActiveConversation({
         workspaceId,
@@ -532,17 +662,25 @@ export default function VoiceHome({
         setOverlay("flow_error");
         return;
       }
+      activeId = created.conversationId;
       setConversationId(created.conversationId);
       userTurnCountRef.current = 0;
       lastSyncedUserTurnCountRef.current = 0;
       askedAnythingElseRef.current = false;
+      sessionStartedRef.current = false;
       setSessionFinished(false);
       setSpokenInsight(null);
       setPatternId(null);
       setFeedbackSaved(false);
     }
 
+    ensureSessionStarted(activeId);
     setOverlay("none");
+    recordPilotEvent({
+      name: "recording_started",
+      workspaceId,
+      conversationId: activeId,
+    });
     void start();
   }
 

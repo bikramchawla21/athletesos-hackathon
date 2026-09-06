@@ -21,6 +21,11 @@ import {
   persistInsightsResult,
 } from "@/server/services/insights-persist-service";
 import { loadAthleteMemory } from "@/server/services/memory-service";
+import {
+  insertPilotEvent,
+  isFirstCompletedReflection,
+} from "@/server/services/pilot-events-service";
+import { logOps } from "@/lib/ops-log.mjs";
 
 const workspaceInsightsSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -179,6 +184,24 @@ async function handleWorkspaceInsights(json: unknown) {
     entityIds: { ...ctx.entityIds, ...ids, client: body.client ?? null },
     status: "succeeded",
     demoMode: Boolean(result.body.demoMode),
+  });
+
+  const firstReflection = await isFirstCompletedReflection(body.workspaceId);
+  if (firstReflection) {
+    await insertPilotEvent({
+      workspaceId: body.workspaceId,
+      personId: access.person.id,
+      conversationId: body.conversationId,
+      name: "athlete_activated",
+      props: { source: "insights" },
+    });
+  }
+
+  logOps("/api/insights", {
+    status: 200,
+    workspaceId: body.workspaceId,
+    client: body.client ?? null,
+    firstReflection,
   });
 
   return NextResponse.json({

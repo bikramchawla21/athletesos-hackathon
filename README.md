@@ -97,6 +97,16 @@ Cross-workspace access returns `403` / `FORBIDDEN_WORKSPACE`. Client-supplied pe
 | `POST /api/speech` | Auth TTS; generated audio ephemeral |
 | `POST /api/legacy-import` | Idempotent import of `athletesos:v1` payload |
 
+## Pilot launch ops (Pass 7)
+
+See [docs/pilot-ops.md](docs/pilot-ops.md) for environment separation, pilot events, backup checklist, cost visibility, and founder health SQL (`npm run pilot:health`).
+
+iPhone device checklist: [docs/pilot-iphone-checklist.md](docs/pilot-iphone-checklist.md).
+
+Install guide: [docs/pilot-install.md](docs/pilot-install.md).
+
+Apply additive migration `0002_pilot_hardening` before relying on `pilot_events` / `pilot_marked_at`.
+
 ## Pilot / product data durability
 
 Neon Postgres is the **canonical** historical record for AthleteOS. Vercel logs, browser state, OpenAI logs, and temporary audio are **not** the system of record.
