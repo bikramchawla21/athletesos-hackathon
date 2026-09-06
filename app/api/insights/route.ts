@@ -6,7 +6,7 @@ import {
   logValidationFailure,
   validationErrorBody,
 } from "@/lib/api-errors.mjs";
-import { generateInsights } from "@/lib/insights.mjs";
+import { generateInsights, generateSpokenInsightSynthesis } from "@/lib/insights.mjs";
 import { parseInsightsRequest } from "@/lib/request-contract.mjs";
 import { authzErrorResponse } from "@/server/authz/http";
 import { assertEntityWorkspace, requireWorkspaceMembership } from "@/server/authz";
@@ -16,11 +16,17 @@ import {
   buildInsightsContext,
   recordModelOperation,
 } from "@/server/services/context-builders";
-import { persistInsightsResult } from "@/server/services/insights-persist-service";
+import {
+  loadReflectionForConversation,
+  persistInsightsResult,
+} from "@/server/services/insights-persist-service";
+import { loadAthleteMemory } from "@/server/services/memory-service";
 
 const workspaceInsightsSchema = z.object({
   workspaceId: z.string().uuid(),
   conversationId: z.string().uuid(),
+  /** Additive: include spokenSynthesis for voice PWA closing. */
+  client: z.enum(["voice_pwa"]).optional(),
 });
 
 export async function POST(request: Request) {
@@ -74,6 +80,18 @@ export async function POST(request: Request) {
   }
 }
 
+async function maybeSpokenSynthesis(args: {
+  client?: "voice_pwa";
+  report: unknown;
+  workspaceId: string;
+}) {
+  if (args.client !== "voice_pwa" || !args.report) return {};
+  const memory = await loadAthleteMemory(args.workspaceId);
+  const spoken = await generateSpokenInsightSynthesis(args.report as never, { memory });
+  if (!spoken.ok || !spoken.body?.spokenSynthesis) return {};
+  return { spokenSynthesis: spoken.body.spokenSynthesis };
+}
+
 async function handleWorkspaceInsights(json: unknown) {
   const body = workspaceInsightsSchema.parse(json);
   const access = await requireWorkspaceMembership(body.workspaceId);
@@ -90,13 +108,37 @@ async function handleWorkspaceInsights(json: unknown) {
   }
   assertEntityWorkspace(conversation.workspaceId, body.workspaceId);
 
+  // Idempotent finalize: conversation already completed → return existing reflection.
+  if (conversation.status === "completed") {
+    const existing = await loadReflectionForConversation(
+      body.workspaceId,
+      body.conversationId,
+    );
+    if (existing) {
+      const spoken = await maybeSpokenSynthesis({
+        client: body.client,
+        report: existing.report,
+        workspaceId: body.workspaceId,
+      });
+      return NextResponse.json({
+        report: existing.report,
+        demoMode: false,
+        alreadyFinalized: true,
+        reflectionId: existing.reflectionId,
+        patternId: existing.patternId,
+        priorityId: existing.priorityId,
+        ...spoken,
+      });
+    }
+  }
+
   const ctx = await buildInsightsContext(body.workspaceId, body.conversationId);
   await recordModelOperation({
     workspaceId: body.workspaceId,
     personId: access.person.id,
     kind: "insights",
     conversationId: body.conversationId,
-    entityIds: ctx.entityIds,
+    entityIds: { ...ctx.entityIds, client: body.client ?? null },
     status: "started",
   });
 
@@ -123,12 +165,18 @@ async function handleWorkspaceInsights(json: unknown) {
     report: result.body.report,
   });
 
+  const spoken = await maybeSpokenSynthesis({
+    client: body.client,
+    report: result.body.report,
+    workspaceId: body.workspaceId,
+  });
+
   await recordModelOperation({
     workspaceId: body.workspaceId,
     personId: access.person.id,
     kind: "insights",
     conversationId: body.conversationId,
-    entityIds: { ...ctx.entityIds, ...ids },
+    entityIds: { ...ctx.entityIds, ...ids, client: body.client ?? null },
     status: "succeeded",
     demoMode: Boolean(result.body.demoMode),
   });
@@ -136,6 +184,8 @@ async function handleWorkspaceInsights(json: unknown) {
   return NextResponse.json({
     report: result.body.report,
     demoMode: Boolean(result.body.demoMode),
+    alreadyFinalized: false,
     ...ids,
+    ...spoken,
   });
 }

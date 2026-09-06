@@ -7,11 +7,17 @@ import {
   shouldSyncMemoryCheckpoint,
 } from "@/lib/memory-guards.mjs";
 import { fetchSpeechAudio } from "@/lib/fetch-speech";
+import {
+  looksLikeAnythingElsePrompt,
+  shouldFinalizeVoiceSession,
+} from "@/lib/session-end.mjs";
 import { uploadRecordingForTranscription } from "@/lib/upload-transcription";
 import {
   ensureActiveConversation,
+  requestVoiceInsights,
   requestVoiceMemoryCheckpoint,
   sendVoiceChatTurn,
+  submitVoiceInsightFamiliarity,
 } from "@/lib/voice-chat";
 import {
   errorCopy,
@@ -34,6 +40,9 @@ type FlowOverlay =
   | "thinking"
   | "speaking"
   | "ready_again"
+  | "finalizing"
+  | "speaking_insight"
+  | "finished"
   | "flow_error";
 
 type PendingChat = {
@@ -43,9 +52,7 @@ type PendingChat = {
 
 /**
  * Voice-first athlete home.
- * Flow: idle → listening → transcribing → thinking → speaking → ready_again
- *
- * Chat text remains canonical. TTS is ephemeral output only.
+ * Flow: talk turns → optional natural end / Done → finalize insights → speak synthesis → feedback → finished
  */
 export default function VoiceHome({
   workspaceId,
@@ -55,20 +62,28 @@ export default function VoiceHome({
   const [overlay, setOverlay] = useState<FlowOverlay>("none");
   const [assistantReply, setAssistantReply] = useState<string | null>(null);
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
+  const [spokenInsight, setSpokenInsight] = useState<string | null>(null);
   const [flowError, setFlowError] = useState<VoiceRecordingErrorCode | null>(null);
   const [pendingRecording, setPendingRecording] = useState<CompletedRecording | null>(null);
   const [pendingChat, setPendingChat] = useState<PendingChat | null>(null);
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [needsTapToPlay, setNeedsTapToPlay] = useState(false);
   const [speechFailed, setSpeechFailed] = useState(false);
+  const [insightSpeechFailed, setInsightSpeechFailed] = useState(false);
+  const [patternId, setPatternId] = useState<string | null>(null);
+  const [feedbackSaved, setFeedbackSaved] = useState(false);
+  const askedAnythingElseRef = useRef(false);
+  const [sessionFinished, setSessionFinished] = useState(false);
 
   const uploadTokenRef = useRef(0);
   const chatInFlightRef = useRef(false);
   const speechInFlightRef = useRef(false);
+  const finalizeInFlightRef = useRef(false);
   const userTurnCountRef = useRef(initialUserTurnCount);
   const lastSyncedUserTurnCountRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const insightAudioModeRef = useRef(false);
 
   const {
     state: recorderState,
@@ -120,6 +135,7 @@ export default function VoiceHome({
     cleanupPlayback();
     setNeedsTapToPlay(false);
     setSpeechFailed(false);
+    setInsightSpeechFailed(false);
     setOverlay("transcribing");
     setFlowError(null);
     setAssistantReply(null);
@@ -146,7 +162,6 @@ export default function VoiceHome({
       return;
     }
 
-    // Mic tracks already released by recorder finalize before this upload.
     clearRecording();
     setPendingRecording(null);
     const transcript = result.text;
@@ -207,6 +222,9 @@ export default function VoiceHome({
       userTurnCountRef.current += 1;
       setPendingChat(null);
       setAssistantReply(chat.reply);
+      if (looksLikeAnythingElsePrompt(chat.reply)) {
+        askedAnythingElseRef.current = true;
+      }
 
       const userTurns = userTurnCountRef.current;
       const correction = looksLikeAthleteCorrection(turn.transcript);
@@ -226,22 +244,93 @@ export default function VoiceHome({
         lastSyncedUserTurnCountRef.current = userTurns;
       }
 
-      await runSpeech(chat.reply, token);
+      const shouldEnd = shouldFinalizeVoiceSession({
+        userTurnCount: userTurns,
+        athleteText: turn.transcript,
+        askedAnythingElse: askedAnythingElseRef.current,
+      });
+
+      if (shouldEnd) {
+        await runFinalization(ensured.conversationId, token);
+        return;
+      }
+
+      await runSpeech(chat.reply, token, "turn");
     } finally {
       chatInFlightRef.current = false;
     }
   }
 
-  async function runSpeech(text: string, token = uploadTokenRef.current) {
+  async function runFinalization(activeConversationId: string, token = ++uploadTokenRef.current) {
+    if (finalizeInFlightRef.current) return;
+    finalizeInFlightRef.current = true;
+    setOverlay("finalizing");
+    setFlowError(null);
+    setNeedsTapToPlay(false);
+    setInsightSpeechFailed(false);
+    cleanupPlayback();
+
+    try {
+      void requestVoiceMemoryCheckpoint({
+        workspaceId,
+        conversationId: activeConversationId,
+        reason: "pre_insights",
+      });
+
+      const insights = await requestVoiceInsights({
+        workspaceId,
+        conversationId: activeConversationId,
+      });
+
+      if (token !== uploadTokenRef.current) return;
+
+      if (!insights.ok) {
+        setFlowError(
+          insights.code === "auth_failed"
+            ? "auth_failed"
+            : insights.code === "insufficient_context"
+              ? "insufficient_context"
+              : "insights_failed",
+        );
+        setOverlay("flow_error");
+        return;
+      }
+
+      setPatternId(insights.patternId);
+      setSessionFinished(true);
+      void requestVoiceMemoryCheckpoint({
+        workspaceId,
+        conversationId: activeConversationId,
+        reason: "session_complete",
+      });
+
+      const synthesis =
+        insights.spokenSynthesis ||
+        "Thanks for talking today. We’ll keep building on what showed up.";
+      setSpokenInsight(synthesis);
+      await runSpeech(synthesis, token, "insight");
+    } finally {
+      finalizeInFlightRef.current = false;
+    }
+  }
+
+  async function runSpeech(
+    text: string,
+    token = uploadTokenRef.current,
+    mode: "turn" | "insight" = "turn",
+  ) {
     if (!text.trim()) {
-      setOverlay("ready_again");
+      if (mode === "insight") setOverlay("finished");
+      else setOverlay("ready_again");
       return;
     }
     if (speechInFlightRef.current) return;
     speechInFlightRef.current = true;
-    setOverlay("speaking");
+    insightAudioModeRef.current = mode === "insight";
+    setOverlay(mode === "insight" ? "speaking_insight" : "speaking");
     setNeedsTapToPlay(false);
-    setSpeechFailed(false);
+    if (mode === "insight") setInsightSpeechFailed(false);
+    else setSpeechFailed(false);
     cleanupPlayback();
 
     try {
@@ -249,9 +338,14 @@ export default function VoiceHome({
       if (token !== uploadTokenRef.current) return;
 
       if (!speech.ok) {
-        setSpeechFailed(true);
-        setFlowError(speech.code === "auth_failed" ? "auth_failed" : "speech_failed");
-        setOverlay("ready_again");
+        if (mode === "insight") {
+          setInsightSpeechFailed(true);
+          setOverlay("finished");
+        } else {
+          setSpeechFailed(true);
+          setFlowError(speech.code === "auth_failed" ? "auth_failed" : "speech_failed");
+          setOverlay("ready_again");
+        }
         return;
       }
 
@@ -264,22 +358,31 @@ export default function VoiceHome({
       audio.onended = () => {
         cleanupPlayback();
         setNeedsTapToPlay(false);
-        setSpeechFailed(false);
-        setOverlay("ready_again");
+        if (insightAudioModeRef.current) {
+          setInsightSpeechFailed(false);
+          setOverlay("finished");
+        } else {
+          setSpeechFailed(false);
+          setOverlay("ready_again");
+        }
       };
       audio.onerror = () => {
         cleanupPlayback();
-        setSpeechFailed(true);
-        setFlowError("speech_failed");
-        setOverlay("ready_again");
+        if (insightAudioModeRef.current) {
+          setInsightSpeechFailed(true);
+          setOverlay("finished");
+        } else {
+          setSpeechFailed(true);
+          setFlowError("speech_failed");
+          setOverlay("ready_again");
+        }
       };
 
       try {
         await audio.play();
       } catch {
-        // iOS / browser autoplay restriction after mic session.
         setNeedsTapToPlay(true);
-        setOverlay("ready_again");
+        setOverlay(mode === "insight" ? "finished" : "ready_again");
       }
     } finally {
       speechInFlightRef.current = false;
@@ -287,48 +390,81 @@ export default function VoiceHome({
   }
 
   function stopSpeaking() {
+    const wasInsight = insightAudioModeRef.current;
     uploadTokenRef.current += 1;
     speechInFlightRef.current = false;
     cleanupPlayback();
     setNeedsTapToPlay(false);
     setSpeechFailed(false);
-    setOverlay("ready_again");
+    setInsightSpeechFailed(false);
+    setOverlay(wasInsight || sessionFinished ? "finished" : "ready_again");
   }
 
   function retryAudio() {
+    if (sessionFinished && spokenInsight) {
+      void runSpeech(spokenInsight, uploadTokenRef.current, "insight");
+      return;
+    }
     if (!assistantReply) return;
     setFlowError(null);
-    void runSpeech(assistantReply);
+    void runSpeech(assistantReply, uploadTokenRef.current, "turn");
   }
 
   async function tapToHear() {
-    if (!assistantReply) return;
+    const text = sessionFinished ? spokenInsight : assistantReply;
+    if (!text) return;
     setNeedsTapToPlay(false);
-    setOverlay("speaking");
+    setOverlay(sessionFinished ? "speaking_insight" : "speaking");
     const audio = audioRef.current;
     if (audio) {
       try {
         await audio.play();
         return;
       } catch {
-        // fall through to regenerate
+        // regenerate
       }
     }
-    void runSpeech(assistantReply);
+    void runSpeech(text, uploadTokenRef.current, sessionFinished ? "insight" : "turn");
+  }
+
+  function markDone() {
+    if (finalizeInFlightRef.current || overlay === "finalizing" || sessionFinished) return;
+    if (userTurnCountRef.current < 1) return;
+    void runFinalization(conversationId);
+  }
+
+  async function submitFamiliarity(answer: "yes" | "kind_of" | "no") {
+    if (!patternId || feedbackSaved) {
+      setFeedbackSaved(true);
+      return;
+    }
+    await submitVoiceInsightFamiliarity({
+      workspaceId,
+      patternId,
+      answer,
+    });
+    setFeedbackSaved(true);
+  }
+
+  function skipFeedback() {
+    setFeedbackSaved(true);
   }
 
   function recordAgain() {
     uploadTokenRef.current += 1;
     chatInFlightRef.current = false;
     speechInFlightRef.current = false;
+    finalizeInFlightRef.current = false;
     cleanupPlayback();
     setAssistantReply(null);
     setLastTranscript(null);
+    setSpokenInsight(null);
     setFlowError(null);
     setPendingRecording(null);
     setPendingChat(null);
     setNeedsTapToPlay(false);
     setSpeechFailed(false);
+    setInsightSpeechFailed(false);
     setOverlay("none");
     clearRecording();
     retry();
@@ -354,18 +490,59 @@ export default function VoiceHome({
     void runChat(pendingChat);
   }
 
-  function beginTalk() {
-    if (overlay === "thinking" || overlay === "transcribing" || overlay === "speaking") return;
+  function retryFinalize() {
+    setFlowError(null);
+    void runFinalization(conversationId);
+  }
+
+  async function beginTalk() {
+    if (
+      overlay === "thinking" ||
+      overlay === "transcribing" ||
+      overlay === "speaking" ||
+      overlay === "speaking_insight" ||
+      overlay === "finalizing"
+    ) {
+      return;
+    }
+
     uploadTokenRef.current += 1;
     chatInFlightRef.current = false;
     speechInFlightRef.current = false;
+    finalizeInFlightRef.current = false;
     cleanupPlayback();
     setNeedsTapToPlay(false);
     setSpeechFailed(false);
-    setOverlay("none");
+    setInsightSpeechFailed(false);
     setFlowError(null);
     setPendingRecording(null);
     setPendingChat(null);
+    setAssistantReply(null);
+    setLastTranscript(null);
+
+    if (sessionFinished || overlay === "finished") {
+      const created = await ensureActiveConversation({
+        workspaceId,
+        forceNew: true,
+      });
+      if (!created.ok) {
+        setFlowError(
+          created.code === "auth_failed" ? "auth_failed" : "conversation_failed",
+        );
+        setOverlay("flow_error");
+        return;
+      }
+      setConversationId(created.conversationId);
+      userTurnCountRef.current = 0;
+      lastSyncedUserTurnCountRef.current = 0;
+      askedAnythingElseRef.current = false;
+      setSessionFinished(false);
+      setSpokenInsight(null);
+      setPatternId(null);
+      setFeedbackSaved(false);
+    }
+
+    setOverlay("none");
     void start();
   }
 
@@ -378,27 +555,36 @@ export default function VoiceHome({
           ? "speaking"
           : overlay === "ready_again"
             ? "ready_again"
-            : overlay === "flow_error"
-              ? "error"
-              : recorderState === "recorded"
-                ? "transcribing"
-                : recorderState;
+            : overlay === "finalizing"
+              ? "finalizing"
+              : overlay === "speaking_insight"
+                ? "speaking_insight"
+                : overlay === "finished"
+                  ? "finished"
+                  : overlay === "flow_error"
+                    ? "error"
+                    : recorderState === "recorded"
+                      ? "transcribing"
+                      : recorderState;
 
   const displayError = flowError ?? recorderError;
   const showIdle = phase === "idle" || phase === "requesting_permission";
   const showReadyAgain =
-    phase === "ready_again" || (showIdle && Boolean(assistantReply) && !pendingChat);
+    phase === "ready_again" || (showIdle && Boolean(assistantReply) && !pendingChat && !sessionFinished);
   const canRetryChat =
     overlay === "flow_error" && Boolean(pendingChat) && !pendingRecording;
   const canRetryUpload =
     overlay === "flow_error" && Boolean(pendingRecording) && displayError !== "empty_transcript";
+  const canRetryFinalize =
+    overlay === "flow_error" &&
+    (displayError === "insights_failed" || displayError === "insufficient_context");
 
   return (
     <main className="voice-shell" data-voice-state={phase} data-conversation-id={conversationId}>
       <div className="voice-stage">
         <span className="eyebrow">AthleteOS</span>
 
-        {showIdle && !assistantReply ? (
+        {showIdle && !assistantReply && !sessionFinished ? (
           <>
             <h1 className="voice-prompt">{VOICE_PROMPT}</h1>
             <button
@@ -406,7 +592,7 @@ export default function VoiceHome({
               className="voice-mic"
               aria-label="Tap to talk"
               disabled={phase === "requesting_permission"}
-              onClick={beginTalk}
+              onClick={() => void beginTalk()}
             >
               <MicIcon />
             </button>
@@ -446,13 +632,16 @@ export default function VoiceHome({
                   className="voice-mic"
                   aria-label="Tap to talk"
                   disabled={phase === "requesting_permission"}
-                  onClick={beginTalk}
+                  onClick={() => void beginTalk()}
                 >
                   <MicIcon />
                 </button>
                 <p className="voice-hint">
                   {phase === "requesting_permission" ? "Allow microphone access…" : "Tap to talk"}
                 </p>
+                <button type="button" className="voice-done-link" onClick={markDone}>
+                  Done
+                </button>
               </>
             ) : null}
           </>
@@ -504,16 +693,14 @@ export default function VoiceHome({
           </>
         ) : null}
 
-        {phase === "speaking" ? (
+        {phase === "speaking" || phase === "speaking_insight" ? (
           <>
             <p className="voice-status listening" aria-live="polite">
               AthleteOS is speaking…
             </p>
-            {assistantReply ? (
-              <p className="voice-reply voice-reply-secondary" data-testid="voice-reply">
-                {assistantReply}
-              </p>
-            ) : null}
+            <p className="voice-reply voice-reply-secondary" data-testid="voice-reply">
+              {phase === "speaking_insight" ? spokenInsight : assistantReply}
+            </p>
             <div className="voice-mic voice-mic-active voice-mic-busy" aria-hidden="true">
               <MicIcon />
             </div>
@@ -522,6 +709,78 @@ export default function VoiceHome({
                 Stop
               </button>
             </div>
+          </>
+        ) : null}
+
+        {phase === "finalizing" ? (
+          <>
+            <p className="voice-status listening" aria-live="polite">
+              Understanding…
+            </p>
+            <p className="voice-hint">Finishing today’s reflection</p>
+            <div className="voice-mic voice-mic-active voice-mic-busy" aria-hidden="true">
+              <MicIcon />
+            </div>
+          </>
+        ) : null}
+
+        {phase === "finished" ? (
+          <>
+            <p className="voice-status">Done for today.</p>
+            {spokenInsight ? (
+              <p className="voice-reply" data-testid="voice-insight">
+                {spokenInsight}
+              </p>
+            ) : null}
+            {needsTapToPlay ? (
+              <div className="voice-actions">
+                <button type="button" className="primary" onClick={() => void tapToHear()}>
+                  Tap to hear AthleteOS
+                </button>
+              </div>
+            ) : null}
+            {insightSpeechFailed && !needsTapToPlay ? (
+              <div className="voice-actions">
+                <button type="button" className="primary" onClick={retryAudio}>
+                  Retry audio
+                </button>
+              </div>
+            ) : null}
+            {patternId && !feedbackSaved ? (
+              <div className="voice-feedback">
+                <p className="voice-hint">Did you already know this?</p>
+                <div className="voice-actions">
+                  <button type="button" className="secondary" onClick={() => void submitFamiliarity("yes")}>
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void submitFamiliarity("kind_of")}
+                  >
+                    Kind of
+                  </button>
+                  <button type="button" className="secondary" onClick={() => void submitFamiliarity("no")}>
+                    No
+                  </button>
+                </div>
+                <button type="button" className="voice-done-link" onClick={skipFeedback}>
+                  Skip
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="voice-mic"
+                  aria-label="Talk about another day"
+                  onClick={() => void beginTalk()}
+                >
+                  <MicIcon />
+                </button>
+                <p className="voice-hint">Talk about how your day went.</p>
+              </>
+            )}
           </>
         ) : null}
 
@@ -534,7 +793,11 @@ export default function VoiceHome({
               <p className="voice-dev-note">Saved what you said so you can retry without re-recording.</p>
             ) : null}
             <div className="voice-actions">
-              {canRetryChat ? (
+              {canRetryFinalize ? (
+                <button type="button" className="primary" onClick={retryFinalize}>
+                  Retry finishing
+                </button>
+              ) : canRetryChat ? (
                 <button type="button" className="primary" onClick={retryChat}>
                   Try again
                 </button>
@@ -550,6 +813,11 @@ export default function VoiceHome({
               {(pendingRecording || pendingChat) && displayError !== "empty_transcript" ? (
                 <button type="button" className="secondary" onClick={recordAgain}>
                   Record again
+                </button>
+              ) : null}
+              {canRetryFinalize ? (
+                <button type="button" className="secondary" onClick={() => void beginTalk()}>
+                  Keep talking
                 </button>
               ) : null}
             </div>

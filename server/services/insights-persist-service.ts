@@ -162,9 +162,62 @@ export async function loadActiveReflectionReport(
       and(eq(reflections.workspaceId, workspaceId), eq(reflections.status, "active")),
     )
     .limit(1);
-
   if (!reflection) return null;
+  return reflectionRowToReport(reflection);
+}
 
+/** Load the reflection tied to a specific conversation (for finalize idempotency). */
+export async function loadReflectionForConversation(
+  workspaceId: string,
+  conversationId: string,
+): Promise<{
+  report: ReflectionReport;
+  reflectionId: string;
+  patternId: string | null;
+  priorityId: string | null;
+} | null> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(reflections)
+    .where(
+      and(
+        eq(reflections.workspaceId, workspaceId),
+        eq(reflections.conversationId, conversationId),
+      ),
+    );
+
+  const chosen =
+    rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
+  if (!chosen) return null;
+
+  const report = await reflectionRowToReport(chosen);
+  const [priority] = await db
+    .select()
+    .from(priorities)
+    .where(eq(priorities.reflectionId, chosen.id))
+    .limit(1);
+
+  return {
+    report,
+    reflectionId: chosen.id,
+    patternId: chosen.patternId,
+    priorityId: priority?.id ?? null,
+  };
+}
+
+async function reflectionRowToReport(reflection: {
+  observations: string[] | null;
+  evidenceIntro: string;
+  evidence: ReflectionReport["evidence"] | null;
+  evidenceNote: string;
+  patternId: string | null;
+  sharedPriorityText: string;
+  focusIntro: string;
+  closing: string;
+  workspaceId: string;
+}): Promise<ReflectionReport> {
+  const db = getDb();
   let patternTitle = "Working pattern";
   let patternExplanation = "";
   if (reflection.patternId) {
@@ -183,7 +236,10 @@ export async function loadActiveReflectionReport(
     .select()
     .from(priorities)
     .where(
-      and(eq(priorities.workspaceId, workspaceId), eq(priorities.status, "active")),
+      and(
+        eq(priorities.workspaceId, reflection.workspaceId),
+        eq(priorities.status, "active"),
+      ),
     )
     .limit(1);
 

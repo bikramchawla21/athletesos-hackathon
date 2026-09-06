@@ -121,9 +121,12 @@ describe("voice home wiring", () => {
     assert.match(home, /thinking/);
     assert.match(home, /speaking/);
     assert.match(home, /ready_again/);
+    assert.match(home, /finalizing/);
+    assert.match(home, /finished/);
     assert.match(home, /uploadRecordingForTranscription/);
     assert.match(home, /sendVoiceChatTurn/);
     assert.match(home, /fetchSpeechAudio/);
+    assert.match(home, /requestVoiceInsights/);
     assert.doesNotMatch(home, /response_ready/);
   });
 

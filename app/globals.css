@@ -312,6 +312,24 @@ h1 { margin: 0 0 28px; font-family: Georgia, "Times New Roman", serif; font-size
   font-size: clamp(0.95rem, 2.2vw, 1.1rem);
   color: var(--muted);
 }
+.voice-done-link {
+  margin-top: 18px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.voice-done-link:hover { color: var(--ink); }
+.voice-feedback {
+  margin-top: 8px;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
 .voice-mic-busy {
   pointer-events: none;
   opacity: 0.85;

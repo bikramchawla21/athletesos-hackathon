@@ -21,6 +21,9 @@ export type VoiceRecordingState =
   | "thinking"
   | "speaking"
   | "ready_again"
+  | "finalizing"
+  | "speaking_insight"
+  | "finished"
   | "error";
 
 export type VoiceRecordingErrorCode =
@@ -35,6 +38,8 @@ export type VoiceRecordingErrorCode =
   | "chat_failed"
   | "conversation_failed"
   | "speech_failed"
+  | "insights_failed"
+  | "insufficient_context"
   | "unknown";
 
 const PREFERRED_MIME_TYPES = [
@@ -89,6 +94,10 @@ export function errorCopy(code: VoiceRecordingErrorCode): string {
       return "Couldn't start the conversation. Try again.";
     case "speech_failed":
       return "Couldn't play AthleteOS. Retry audio — your reply is saved.";
+    case "insights_failed":
+      return "Couldn't finish today’s reflection. Retry finishing — your conversation is saved.";
+    case "insufficient_context":
+      return "Need a bit more of your story before I can share a careful reflection.";
     default:
       return "Something went wrong. Try again.";
   }

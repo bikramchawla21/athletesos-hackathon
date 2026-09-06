@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 
-/** Concise AthleteOS replies (~5–15s spoken). Hard cap below OpenAI’s 4096. */
-export const MAX_SPEECH_CHARS = 800;
+/** Concise AthleteOS replies + short spoken insight closings. */
+export const MAX_SPEECH_CHARS = 1200;
 
 export const SPEECH_MODEL = "gpt-4o-mini-tts";
 
