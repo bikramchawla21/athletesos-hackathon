@@ -76,9 +76,6 @@ export default async function WorkspacePage({ params, searchParams }: PageProps)
       <>
         <div className="voice-chrome">
           <UserButton />
-          <Link className="voice-subtle-link" href={`/app/w/${workspaceId}?view=classic`}>
-            History
-          </Link>
         </div>
         <VoiceHome
           workspaceId={workspaceId}

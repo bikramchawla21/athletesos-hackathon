@@ -14,22 +14,39 @@ import {
   conversations,
 } from "@/db/schema";
 import type { ReflectionReport } from "@/lib/types";
+import {
+  presentReportForPatternMaturity,
+  resolveOccurrenceMaturity,
+  resolvePatternPersistStatus,
+} from "@/lib/pattern-threshold.mjs";
 
 /**
  * Persist insights atomically: pattern + reflection + priority (+ focus areas).
  * Archives previous active priority for the workspace.
  *
+ * Pattern status (occurrence-based — NOT conversation/session count):
+ * - proposed when confident distinctOccurrences < 3 (observation / candidate)
+ * - emerging when >= 3 distinct real-world occurrences of the same/similar phenomenon
+ * Ambiguous occurrence lists → treat as 0 → proposed (precision over recall).
+ *
  * Provenance (Pass 8 additive): pattern_evidence rows use sourceType "message"
  * with real message UUIDs from this conversation plus any workspace memory-linked
- * messages from other conversations. Legacy self-referential observation rows
- * are no longer written.
+ * messages from other conversations. Occurrence episodes are stored on the
+ * timeline payload (no occurrence table yet).
  */
 export async function persistInsightsResult(args: {
   workspaceId: string;
   conversationId: string;
   personId: string;
   report: ReflectionReport;
-}): Promise<{ reflectionId: string; patternId: string; priorityId: string }> {
+}): Promise<{
+  reflectionId: string;
+  patternId: string;
+  priorityId: string;
+  patternMaturity: number;
+  patternStatus: "proposed" | "emerging";
+  report: ReflectionReport;
+}> {
   const db = getDb();
 
   return db.transaction(async (tx) => {
@@ -43,23 +60,11 @@ export async function persistInsightsResult(args: {
         ),
       );
 
-    const [pattern] = await tx
-      .insert(patterns)
-      .values({
-        workspaceId: args.workspaceId,
-        statement: args.report.pattern.title,
-        explanation: args.report.pattern.explanation,
-        status: "supported",
-        visibility: "workspace",
-      })
-      .returning();
-
-    if (!pattern) throw new Error("Failed to insert pattern.");
-
     const sessionMessages = await tx
       .select({
         id: messages.id,
         role: messages.role,
+        conversationId: messages.conversationId,
       })
       .from(messages)
       .where(
@@ -69,16 +74,14 @@ export async function persistInsightsResult(args: {
         ),
       );
 
+    const evidenceConversationIds: string[] = [args.conversationId];
     const linkedMessageIds = new Set<string>();
+    const evidenceInserts: { messageId: string; note: string }[] = [];
+
     for (const msg of sessionMessages) {
       if (msg.role !== "user") continue;
       linkedMessageIds.add(msg.id);
-      await tx.insert(patternEvidence).values({
-        patternId: pattern.id,
-        sourceType: "message",
-        sourceId: msg.id,
-        note: "session_user_message",
-      });
+      evidenceInserts.push({ messageId: msg.id, note: "session_user_message" });
     }
 
     // Historical memory-linked messages from other conversations (same workspace).
@@ -111,13 +114,49 @@ export async function persistInsightsResult(args: {
       for (const source of sources) {
         if (!source.messageId || linkedMessageIds.has(source.messageId)) continue;
         linkedMessageIds.add(source.messageId);
-        await tx.insert(patternEvidence).values({
-          patternId: pattern.id,
-          sourceType: "message",
-          sourceId: source.messageId,
+        if (source.conversationId) evidenceConversationIds.push(source.conversationId);
+        evidenceInserts.push({
+          messageId: source.messageId,
           note: "historical_memory_message",
         });
       }
+    }
+
+    // patternMaturity = distinct real-world occurrence count (not session count).
+    const patternMaturity = resolveOccurrenceMaturity({ report: args.report });
+    const patternStatus = resolvePatternPersistStatus(patternMaturity);
+    const presentedReport = presentReportForPatternMaturity(args.report, patternMaturity);
+    const occurrenceEpisodes = (args.report.distinctOccurrences ?? [])
+      .filter(
+        (o) =>
+          typeof o?.episode === "string" &&
+          o.episode.trim() &&
+          typeof o?.whyDistinct === "string" &&
+          o.whyDistinct.trim(),
+      )
+      .map((o) => ({ episode: o.episode.trim(), whyDistinct: o.whyDistinct.trim() }));
+    const supportingConversationIds = [...new Set(evidenceConversationIds)];
+
+    const [pattern] = await tx
+      .insert(patterns)
+      .values({
+        workspaceId: args.workspaceId,
+        statement: presentedReport.pattern.title,
+        explanation: presentedReport.pattern.explanation,
+        status: patternStatus,
+        visibility: "workspace",
+      })
+      .returning();
+
+    if (!pattern) throw new Error("Failed to insert pattern.");
+
+    for (const row of evidenceInserts) {
+      await tx.insert(patternEvidence).values({
+        patternId: pattern.id,
+        sourceType: "message",
+        sourceId: row.messageId,
+        note: row.note,
+      });
     }
 
     // Category/explanation labels remain on reflections.evidence jsonb — not as fake FK rows.
@@ -127,14 +166,14 @@ export async function persistInsightsResult(args: {
       .values({
         workspaceId: args.workspaceId,
         conversationId: args.conversationId,
-        observations: args.report.observations,
-        evidenceIntro: args.report.evidenceIntro,
-        evidence: args.report.evidence,
-        evidenceNote: args.report.evidenceNote,
+        observations: presentedReport.observations,
+        evidenceIntro: presentedReport.evidenceIntro,
+        evidence: presentedReport.evidence,
+        evidenceNote: presentedReport.evidenceNote,
         patternId: pattern.id,
-        sharedPriorityText: args.report.sharedPriority,
-        focusIntro: args.report.focusIntro,
-        closing: args.report.closing,
+        sharedPriorityText: presentedReport.sharedPriority,
+        focusIntro: presentedReport.focusIntro,
+        closing: presentedReport.closing,
         visibility: "athlete_private",
         status: "active",
       })
@@ -157,7 +196,7 @@ export async function persistInsightsResult(args: {
       .values({
         workspaceId: args.workspaceId,
         reflectionId: reflection.id,
-        statement: args.report.sharedPriority,
+        statement: presentedReport.sharedPriority,
         visibility: "workspace",
         status: "active",
         whyNow: "From the athlete discovery reflection.",
@@ -173,7 +212,7 @@ export async function persistInsightsResult(args: {
       note: "Derived from reflection pattern",
     });
 
-    const focusLabels = (args.report.focusAreas ?? []).slice(0, 3);
+    const focusLabels = (presentedReport.focusAreas ?? []).slice(0, 3);
     for (let i = 0; i < focusLabels.length; i += 1) {
       await tx.insert(focusAreas).values({
         priorityId: priority.id,
@@ -197,6 +236,11 @@ export async function persistInsightsResult(args: {
         patternId: pattern.id,
         priorityId: priority.id,
         conversationId: args.conversationId,
+        patternMaturity,
+        patternStatus,
+        occurrenceCount: patternMaturity,
+        occurrences: occurrenceEpisodes,
+        supportingConversationIds,
       },
     });
 
@@ -212,6 +256,9 @@ export async function persistInsightsResult(args: {
       reflectionId: reflection.id,
       patternId: pattern.id,
       priorityId: priority.id,
+      patternMaturity,
+      patternStatus,
+      report: presentedReport,
     };
   });
 }

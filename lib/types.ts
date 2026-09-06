@@ -16,6 +16,12 @@ export type WorkingPattern = {
   explanation: string;
 };
 
+/** Distinct real-world episode supporting a candidate phenomenon (not a conversation id). */
+export type DistinctOccurrence = {
+  episode: string;
+  whyDistinct: string;
+};
+
 export type ReflectionReport = {
   observations: string[];
   evidenceIntro: string;
@@ -26,6 +32,11 @@ export type ReflectionReport = {
   focusIntro: string;
   focusAreas: string[];
   closing: string;
+  /**
+   * Explicit distinct real-world occurrences of the same/similar phenomenon.
+   * Required for athlete-facing pattern eligibility (>=3). Missing/empty = ambiguous → no pattern.
+   */
+  distinctOccurrences?: DistinctOccurrence[];
 };
 
 export type InsightsResponse = {

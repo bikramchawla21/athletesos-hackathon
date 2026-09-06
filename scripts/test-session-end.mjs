@@ -158,9 +158,11 @@ describe("voice session finalization wiring", () => {
     assert.match(home, /submitVoiceInsightFamiliarity/);
     assert.match(home, /forceNew:\s*true/);
     assert.match(home, /Retry finishing/);
+    assert.match(home, /returnToCleanHome/);
     assert.match(route, /spokenSynthesis/);
     assert.match(route, /alreadyFinalized/);
     assert.match(route, /loadReflectionForConversation/);
     assert.match(route, /voice_pwa/);
+    assert.match(route, /patternMaturity/);
   });
 });

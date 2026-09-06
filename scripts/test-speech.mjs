@@ -136,6 +136,8 @@ describe("speech route privacy + auth wiring", () => {
     assert.match(home, /Tap to hear AthleteOS/);
     assert.match(home, /stopSpeaking/);
     assert.match(home, /revokeObjectURL/);
+    assert.match(home, /unlockAudioForPlayback/);
+    assert.match(home, /tts_autoplay/);
     // Retry audio must not re-invoke chat / insights
     assert.match(home, /function retryAudio/);
     assert.match(home, /runSpeech\(/);

@@ -11,6 +11,7 @@ export const PILOT_EVENT_NAMES = [
   "assistant_response_generated",
   "tts_succeeded",
   "tts_failed",
+  "tts_autoplay",
   "session_completed",
   "insight_generated",
   "insight_feedback",

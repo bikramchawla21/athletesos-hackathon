@@ -115,21 +115,27 @@ export async function loadAthleteMemory(workspaceId: string): Promise<AthleteMem
     else if (item.kind === "significant_experience") significantExperiences.push(mapped);
   }
 
+  // proposed = insufficient distinct occurrences — must not enter AthleteMemory as a pattern.
+  // Only emerging/revised (set only after >=3 confident distinct occurrences) are athlete-facing.
+  // Legacy "supported" rows are excluded until occurrence identity is first-class (precision over recall).
   const patternRows = await db
     .select()
     .from(patterns)
     .where(
       and(
         eq(patterns.workspaceId, workspaceId),
-        inArray(patterns.status, ["emerging", "supported", "revised", "rejected"]),
+        inArray(patterns.status, ["emerging", "revised"]),
       ),
     );
 
-  const observedPatterns: PatternMemory[] = patternRows.map((p) => ({
-    statement: p.statement,
-    supportingMessageIds: [],
-    status: p.status === "archived" ? "revised" : (p.status as PatternMemory["status"]),
-  }));
+  const observedPatterns: PatternMemory[] = [];
+  for (const p of patternRows) {
+    observedPatterns.push({
+      statement: p.statement,
+      supportingMessageIds: [],
+      status: p.status === "archived" ? "revised" : (p.status as PatternMemory["status"]),
+    });
+  }
 
   const feedbackRows = await db
     .select()

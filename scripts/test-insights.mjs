@@ -204,7 +204,9 @@ describe("insight prompt safeguards", () => {
   it("requires transcript-only evidence and honors corrections", () => {
     assert.match(INSIGHT_INSTRUCTIONS, /Never invent coach feedback/i);
     assert.match(INSIGHT_INSTRUCTIONS, /corrections?/i);
-    assert.match(INSIGHT_INSTRUCTIONS, /three distinct signals/i);
+    assert.match(INSIGHT_INSTRUCTIONS, /distinctOccurrences/i);
+    assert.match(INSIGHT_INSTRUCTIONS, /distinct real-world/i);
+    assert.doesNotMatch(INSIGHT_INSTRUCTIONS, /three distinct discovery sessions/i);
     assert.match(INSIGHT_INSTRUCTIONS, /Do not diagnose/i);
   });
 

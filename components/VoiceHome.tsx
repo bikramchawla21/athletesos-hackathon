@@ -94,6 +94,55 @@ export default function VoiceHome({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const insightAudioModeRef = useRef(false);
+  /** Unlocked during mic tap so later TTS play() can succeed on iOS. */
+  const unlockedAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUnlockedRef = useRef(false);
+
+  // Tiny silent wav — unlocks WebKit audio during a user gesture.
+  const SILENT_UNLOCK_SRC =
+    "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+
+  async function unlockAudioForPlayback() {
+    try {
+      const audio = unlockedAudioRef.current ?? new Audio();
+      audio.setAttribute("playsinline", "true");
+      // @ts-expect-error playsInline exists on HTMLMediaElement in WebKit
+      audio.playsInline = true;
+      unlockedAudioRef.current = audio;
+      audio.src = SILENT_UNLOCK_SRC;
+      await audio.play();
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      audioUnlockedRef.current = true;
+    } catch {
+      audioUnlockedRef.current = false;
+    }
+  }
+
+  function getPlaybackAudioElement() {
+    const audio = unlockedAudioRef.current ?? new Audio();
+    audio.setAttribute("playsinline", "true");
+    // @ts-expect-error playsInline exists on HTMLMediaElement in WebKit
+    audio.playsInline = true;
+    unlockedAudioRef.current = audio;
+    return audio;
+  }
+
+  function returnToCleanHome() {
+    cleanupPlayback();
+    setOverlay("none");
+    setAssistantReply(null);
+    setLastTranscript(null);
+    setSpokenInsight(null);
+    setNeedsTapToPlay(false);
+    setSpeechFailed(false);
+    setInsightSpeechFailed(false);
+    setFlowError(null);
+    setPendingRecording(null);
+    setPendingChat(null);
+    // sessionFinished stays true → next beginTalk creates a new conversation
+  }
 
   const {
     state: recorderState,
@@ -457,8 +506,9 @@ export default function VoiceHome({
 
       const url = URL.createObjectURL(speech.blob);
       objectUrlRef.current = url;
-      const audio = new Audio(url);
+      const audio = getPlaybackAudioElement();
       audio.preload = "auto";
+      audio.src = url;
       audioRef.current = audio;
 
       audio.onended = () => {
@@ -502,8 +552,34 @@ export default function VoiceHome({
       };
 
       try {
+        // Attempt automatic playback first; fallback UI only after a real rejection.
         await audio.play();
-      } catch {
+        recordPilotEvent({
+          name: "tts_autoplay",
+          workspaceId,
+          conversationId,
+          props: {
+            mode,
+            ok: true,
+            unlocked: audioUnlockedRef.current,
+          },
+        });
+      } catch (err) {
+        const errorName =
+          err && typeof err === "object" && "name" in err
+            ? String((err as { name?: string }).name || "Error")
+            : "Error";
+        recordPilotEvent({
+          name: "tts_autoplay",
+          workspaceId,
+          conversationId,
+          props: {
+            mode,
+            ok: false,
+            unlocked: audioUnlockedRef.current,
+            errorName,
+          },
+        });
         setNeedsTapToPlay(true);
         setOverlay(mode === "insight" ? "finished" : "ready_again");
       }
@@ -559,6 +635,7 @@ export default function VoiceHome({
   async function submitFamiliarity(answer: "yes" | "kind_of" | "no") {
     if (!patternId || feedbackSaved) {
       setFeedbackSaved(true);
+      returnToCleanHome();
       return;
     }
     await submitVoiceInsightFamiliarity({
@@ -573,10 +650,12 @@ export default function VoiceHome({
       props: { answer, patternId },
     });
     setFeedbackSaved(true);
+    returnToCleanHome();
   }
 
   function skipFeedback() {
     setFeedbackSaved(true);
+    returnToCleanHome();
   }
 
   function recordAgain() {
@@ -681,8 +760,19 @@ export default function VoiceHome({
       workspaceId,
       conversationId: activeId,
     });
+    // Unlock audio inside the mic tap gesture so later TTS autoplay can succeed on iOS.
+    void unlockAudioForPlayback();
     void start();
   }
+
+  // After finalize + insight audio handled + feedback done/skipped → clean IDLE home.
+  useEffect(() => {
+    if (overlay !== "finished") return;
+    if (needsTapToPlay || insightSpeechFailed) return;
+    if (patternId && !feedbackSaved) return;
+    returnToCleanHome();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional post-finalize reset
+  }, [overlay, needsTapToPlay, insightSpeechFailed, patternId, feedbackSaved]);
 
   const phase: VoiceRecordingState =
     overlay === "transcribing"

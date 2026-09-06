@@ -89,10 +89,14 @@ async function maybeSpokenSynthesis(args: {
   client?: "voice_pwa";
   report: unknown;
   workspaceId: string;
+  patternMaturity?: number;
 }) {
   if (args.client !== "voice_pwa" || !args.report) return {};
   const memory = await loadAthleteMemory(args.workspaceId);
-  const spoken = await generateSpokenInsightSynthesis(args.report as never, { memory });
+  const spoken = await generateSpokenInsightSynthesis(args.report as never, {
+    memory,
+    patternMaturity: args.patternMaturity,
+  });
   if (!spoken.ok || !spoken.body?.spokenSynthesis) return {};
   return { spokenSynthesis: spoken.body.spokenSynthesis };
 }
@@ -172,8 +176,9 @@ async function handleWorkspaceInsights(json: unknown) {
 
   const spoken = await maybeSpokenSynthesis({
     client: body.client,
-    report: result.body.report,
+    report: ids.report,
     workspaceId: body.workspaceId,
+    patternMaturity: ids.patternMaturity,
   });
 
   await recordModelOperation({
@@ -181,7 +186,15 @@ async function handleWorkspaceInsights(json: unknown) {
     personId: access.person.id,
     kind: "insights",
     conversationId: body.conversationId,
-    entityIds: { ...ctx.entityIds, ...ids, client: body.client ?? null },
+    entityIds: {
+      ...ctx.entityIds,
+      reflectionId: ids.reflectionId,
+      patternId: ids.patternId,
+      priorityId: ids.priorityId,
+      patternMaturity: ids.patternMaturity,
+      patternStatus: ids.patternStatus,
+      client: body.client ?? null,
+    },
     status: "succeeded",
     demoMode: Boolean(result.body.demoMode),
   });
@@ -202,13 +215,19 @@ async function handleWorkspaceInsights(json: unknown) {
     workspaceId: body.workspaceId,
     client: body.client ?? null,
     firstReflection,
+    patternMaturity: ids.patternMaturity,
+    patternStatus: ids.patternStatus,
   });
 
   return NextResponse.json({
-    report: result.body.report,
+    report: ids.report,
     demoMode: Boolean(result.body.demoMode),
     alreadyFinalized: false,
-    ...ids,
+    reflectionId: ids.reflectionId,
+    patternId: ids.patternId,
+    priorityId: ids.priorityId,
+    patternMaturity: ids.patternMaturity,
+    patternStatus: ids.patternStatus,
     ...spoken,
   });
 }

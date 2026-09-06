@@ -149,4 +149,23 @@ describe("voice home wiring", () => {
     assert.match(home, /retryUpload/);
     assert.match(home, /retryAudio/);
   });
+
+  it("attempts autoplay after unlock and only shows tap fallback after rejection", () => {
+    const home = readFileSync(join(__dirname, "../components/VoiceHome.tsx"), "utf8");
+    assert.match(home, /unlockAudioForPlayback/);
+    assert.match(home, /tts_autoplay/);
+    assert.match(home, /await audio\.play\(\)/);
+    assert.match(home, /setNeedsTapToPlay\(true\)/);
+    assert.match(home, /returnToCleanHome/);
+    // Fallback must be gated on needsTapToPlay, not shown preemptively as the only path
+    assert.match(home, /needsTapToPlay \? \(/);
+  });
+
+  it("athlete pilot page does not expose History navigation", () => {
+    const page = readFileSync(join(__dirname, "../app/app/w/[workspaceId]/page.tsx"), "utf8");
+    assert.doesNotMatch(page, />\s*History\s*</);
+    assert.match(page, /VoiceHome/);
+    // Classic route may remain for internal use, but not linked from voice chrome.
+    assert.match(page, /view === "classic"/);
+  });
 });
