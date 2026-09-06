@@ -183,6 +183,15 @@ describe("voice chat wiring + authz invariants", () => {
     assert.match(route, /loadAthleteMemory|buildDiscoveryContext/);
   });
 
+  it("records voice inputSource provenance on model_operations entityIds without schema migration", () => {
+    const route = readFileSync(join(__dirname, "../app/api/chat/route.ts"), "utf8");
+    assert.match(route, /inputSource:\s*"voice"/);
+    assert.match(route, /userMessageId:\s*userMessage\.id/);
+    assert.match(route, /client === "voice_pwa"/);
+    assert.match(route, /appendMessage/);
+    assert.match(route, /buildDiscoveryContext/);
+  });
+
   it("workspace chat still loads AthleteMemory via buildDiscoveryContext", () => {
     const builders = readFileSync(
       join(__dirname, "../server/services/context-builders.ts"),

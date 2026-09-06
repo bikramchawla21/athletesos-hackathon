@@ -86,14 +86,43 @@ Cross-workspace access returns `403` / `FORBIDDEN_WORKSPACE`. Client-supplied pe
 | Route | Notes |
 |-------|--------|
 | `POST/GET /api/workspaces` | Create / list athlete workspaces |
-| `POST /api/workspaces/:id/reset` | Archive performance data (keeps account) |
+| `POST /api/workspaces/:id/reset` | **Hard-deletes** workspace performance history (messages, memory, patterns, reflections, priorities). Keeps Person/membership. Not an archive. |
 | `POST /api/conversations` | Start conversation + opening message |
 | `GET /api/conversations/:id?workspaceId=` | Load messages + memory + report |
 | `POST /api/conversations/:id/continue` | Reopen continuation |
-| `POST /api/chat` | With `workspaceId`: persist + context builders; without: anonymous demo |
-| `POST /api/memory` | Workspace: load/merge/persist memory items |
+| `POST /api/chat` | With `workspaceId`: persist + context builders; without: anonymous demo. Voice PWA sets `client: "voice_pwa"` (prompt + `model_operations.entityIds.inputSource=voice`). |
+| `POST /api/memory` | Workspace: load/merge/persist memory items (archives prior active items) |
 | `POST /api/insights` | Workspace: persist reflection/pattern/priority transactionally |
+| `POST /api/transcribe` | Auth STT; raw audio ephemeral; transcript not written here |
+| `POST /api/speech` | Auth TTS; generated audio ephemeral |
 | `POST /api/legacy-import` | Idempotent import of `athletesos:v1` payload |
+
+## Pilot / product data durability
+
+Neon Postgres is the **canonical** historical record for AthleteOS. Vercel logs, browser state, OpenAI logs, and temporary audio are **not** the system of record.
+
+**Durable:** Person, workspace, memberships, conversations, messages (text), memory_items (+ sources), patterns (+ evidence/feedback), reflections, priorities, model_operations, timeline_events.
+
+**Ephemeral by design:** raw microphone audio, generated TTS audio.
+
+**Voice turns:** STT transcript → `messages.content` via `/api/chat` (same path as typed). Provenance `inputSource=voice` is recorded on `model_operations.entityIds` when `client: "voice_pwa"` (no messages schema migration).
+
+**Supersede vs delete (normal paths):** memory_items → `archived`; reflections → `superseded`; priorities → `archived`/`replaced`. Messages are append-only.
+
+**Known hard wipe:** `POST /api/workspaces/:id/reset` permanently deletes workspace history. Treat as pilot-risk; prefer new conversation for a fresh reflection day.
+
+### Neon backup / recovery (ops)
+
+Configured outside this repo (Neon Console → project Settings → Instant restore):
+
+| Capability | Notes |
+|------------|--------|
+| Point-in-time / instant restore | Neon history window (Free: up to 6h; Launch/Scale: default often 1 day, up to 7–30 days by plan) |
+| Deleted project recovery | Neon typically allows ~7 days to undelete a project |
+| Logical export | `pg_dump` / `pg_restore` supported; not automated in-app |
+| Workspace reconstruction | Technically: query by `workspaceId` → conversations → messages → memory_items/sources → reflections/patterns/priorities. No admin export UI yet. |
+
+**Never** run `drizzle-kit push` or destructive migrations against the pilot/production database casually. Prefer additive SQL migrations. Automated tests do **not** connect to Neon.
 
 ## Scripts
 

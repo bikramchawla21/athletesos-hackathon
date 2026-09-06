@@ -24,7 +24,12 @@ import {
 import { createEmptyAthleteMemory } from "@/lib/memory.mjs";
 
 /**
- * Archive performance data for a workspace. Does not delete Person or Clerk identity.
+ * DESTRUCTIVE: hard-deletes conversations, messages, memory, patterns, reflections,
+ * priorities, and related evidence for a workspace.
+ *
+ * Does NOT delete Person or Clerk identity. Keeps memberships.
+ * Pilot/production athlete history is permanently removed — do not treat as archive.
+ * Prefer starting a new conversation when the athlete only wants a fresh reflection.
  */
 export async function resetAthleteWorkspace(args: {
   workspaceId: string;

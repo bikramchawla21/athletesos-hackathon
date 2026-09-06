@@ -180,7 +180,7 @@ async function handleWorkspaceChat(json: unknown) {
     ]);
   }
 
-  await appendMessage({
+  const userMessage = await appendMessage({
     conversationId: body.conversationId,
     workspaceId: body.workspaceId,
     role: "user",
@@ -188,13 +188,26 @@ async function handleWorkspaceChat(json: unknown) {
     clientMessageId: body.clientMessageId,
   });
 
+  const provenance =
+    body.client === "voice_pwa"
+      ? {
+          inputSource: "voice" as const,
+          client: "voice_pwa" as const,
+          clientMessageId: body.clientMessageId,
+          userMessageId: userMessage.id,
+        }
+      : {
+          clientMessageId: body.clientMessageId,
+          userMessageId: userMessage.id,
+        };
+
   const ctx = await buildDiscoveryContext(body.workspaceId, body.conversationId);
   await recordModelOperation({
     workspaceId: body.workspaceId,
     personId: access.person.id,
     kind: "chat",
     conversationId: body.conversationId,
-    entityIds: ctx.entityIds,
+    entityIds: { ...ctx.entityIds, ...provenance },
     status: "started",
   });
 
@@ -209,7 +222,7 @@ async function handleWorkspaceChat(json: unknown) {
       personId: access.person.id,
       kind: "chat",
       conversationId: body.conversationId,
-      entityIds: ctx.entityIds,
+      entityIds: { ...ctx.entityIds, ...provenance },
       status: "failed",
       errorCode: result.body?.code ?? ERROR_CODES.OPENAI_REQUEST_FAILED,
       demoMode: Boolean(result.body?.demoMode),
@@ -230,7 +243,11 @@ async function handleWorkspaceChat(json: unknown) {
     personId: access.person.id,
     kind: "chat",
     conversationId: body.conversationId,
-    entityIds: { ...ctx.entityIds, assistantMessageId: assistant.id },
+    entityIds: {
+      ...ctx.entityIds,
+      ...provenance,
+      assistantMessageId: assistant.id,
+    },
     status: "succeeded",
     demoMode: Boolean(result.body.demoMode),
   });
