@@ -5,6 +5,7 @@ import {
   memoryItemSources,
   memoryItems,
   messages,
+  occurrenceLedger,
   patternEvidence,
   patterns,
   priorities,
@@ -15,24 +16,62 @@ import {
 } from "@/db/schema";
 import type { ReflectionReport } from "@/lib/types";
 import {
+  extractConfidentOccurrences,
+  mergeOccurrenceEpisodes,
+  resolvePhenomenonKeyFromReport,
+} from "@/lib/occurrence-ledger.mjs";
+import {
   presentReportForPatternMaturity,
   resolveOccurrenceMaturity,
   resolvePatternPersistStatus,
 } from "@/lib/pattern-threshold.mjs";
 
+export type OccurrenceLedgerRow = {
+  phenomenonKey: string;
+  episode: string;
+  episodeKey: string;
+  whyDistinct: string;
+  conversationId: string | null;
+};
+
 /**
- * Persist insights atomically: pattern + reflection + priority (+ focus areas).
- * Archives previous active priority for the workspace.
+ * Load confirmed occurrence ledger rows for a workspace (optionally one phenomenon).
+ */
+export async function loadOccurrenceLedger(
+  workspaceId: string,
+  phenomenonKey?: string | null,
+): Promise<OccurrenceLedgerRow[]> {
+  const db = getDb();
+  const conditions = [eq(occurrenceLedger.workspaceId, workspaceId)];
+  if (phenomenonKey) {
+    conditions.push(eq(occurrenceLedger.phenomenonKey, phenomenonKey));
+  }
+  const rows = await db
+    .select({
+      phenomenonKey: occurrenceLedger.phenomenonKey,
+      episode: occurrenceLedger.episode,
+      episodeKey: occurrenceLedger.episodeKey,
+      whyDistinct: occurrenceLedger.whyDistinct,
+      conversationId: occurrenceLedger.conversationId,
+    })
+    .from(occurrenceLedger)
+    .where(and(...conditions));
+  return rows;
+}
+
+/**
+ * Persist insights atomically: pattern + reflection + priority (+ focus areas)
+ * and append new distinct episodes to the workspace occurrence ledger.
  *
  * Pattern status (occurrence-based — NOT conversation/session count):
- * - proposed when confident distinctOccurrences < 3 (observation / candidate)
+ * - proposed when ledger + this report’s confident episodes < 3
  * - emerging when >= 3 distinct real-world occurrences of the same/similar phenomenon
- * Ambiguous occurrence lists → treat as 0 → proposed (precision over recall).
+ * Ambiguous occurrence lists → treat as 0 new episodes (precision over recall).
  *
  * Provenance (Pass 8 additive): pattern_evidence rows use sourceType "message"
  * with real message UUIDs from this conversation plus any workspace memory-linked
- * messages from other conversations. Occurrence episodes are stored on the
- * timeline payload (no occurrence table yet).
+ * messages from other conversations. Occurrence episodes live in occurrence_ledger
+ * and are mirrored on the timeline payload.
  */
 export async function persistInsightsResult(args: {
   workspaceId: string;
@@ -45,6 +84,7 @@ export async function persistInsightsResult(args: {
   priorityId: string;
   patternMaturity: number;
   patternStatus: "proposed" | "emerging";
+  phenomenonKey: string;
   report: ReflectionReport;
 }> {
   const db = getDb();
@@ -122,19 +162,38 @@ export async function persistInsightsResult(args: {
       }
     }
 
-    // patternMaturity = distinct real-world occurrence count (not session count).
-    const patternMaturity = resolveOccurrenceMaturity({ report: args.report });
+    const phenomenonKey = resolvePhenomenonKeyFromReport(args.report);
+    const incomingEpisodes = extractConfidentOccurrences(args.report);
+
+    let priorRows: {
+      episode: string;
+      episodeKey: string;
+      whyDistinct: string;
+    }[] = [];
+    if (phenomenonKey) {
+      priorRows = await tx
+        .select({
+          episode: occurrenceLedger.episode,
+          episodeKey: occurrenceLedger.episodeKey,
+          whyDistinct: occurrenceLedger.whyDistinct,
+        })
+        .from(occurrenceLedger)
+        .where(
+          and(
+            eq(occurrenceLedger.workspaceId, args.workspaceId),
+            eq(occurrenceLedger.phenomenonKey, phenomenonKey),
+          ),
+        );
+    }
+
+    // patternMaturity = ledger + this report (deduped), not session count.
+    const patternMaturity = resolveOccurrenceMaturity({
+      report: args.report,
+      priorOccurrences: priorRows,
+    });
     const patternStatus = resolvePatternPersistStatus(patternMaturity);
     const presentedReport = presentReportForPatternMaturity(args.report, patternMaturity);
-    const occurrenceEpisodes = (args.report.distinctOccurrences ?? [])
-      .filter(
-        (o) =>
-          typeof o?.episode === "string" &&
-          o.episode.trim() &&
-          typeof o?.whyDistinct === "string" &&
-          o.whyDistinct.trim(),
-      )
-      .map((o) => ({ episode: o.episode.trim(), whyDistinct: o.whyDistinct.trim() }));
+    const mergedEpisodes = mergeOccurrenceEpisodes(priorRows, incomingEpisodes);
     const supportingConversationIds = [...new Set(evidenceConversationIds)];
 
     const [pattern] = await tx
@@ -159,8 +218,6 @@ export async function persistInsightsResult(args: {
       });
     }
 
-    // Category/explanation labels remain on reflections.evidence jsonb — not as fake FK rows.
-
     const [reflection] = await tx
       .insert(reflections)
       .values({
@@ -180,6 +237,34 @@ export async function persistInsightsResult(args: {
       .returning();
 
     if (!reflection) throw new Error("Failed to insert reflection.");
+
+    // Append only newly seen episode keys for this phenomenon.
+    if (phenomenonKey) {
+      const priorKeys = new Set(priorRows.map((r) => r.episodeKey));
+      for (const ep of incomingEpisodes) {
+        if (priorKeys.has(ep.episodeKey)) continue;
+        await tx
+          .insert(occurrenceLedger)
+          .values({
+            workspaceId: args.workspaceId,
+            phenomenonKey,
+            episode: ep.episode,
+            episodeKey: ep.episodeKey,
+            whyDistinct: ep.whyDistinct,
+            conversationId: args.conversationId,
+            patternId: pattern.id,
+            reflectionId: reflection.id,
+          })
+          .onConflictDoNothing({
+            target: [
+              occurrenceLedger.workspaceId,
+              occurrenceLedger.phenomenonKey,
+              occurrenceLedger.episodeKey,
+            ],
+          });
+        priorKeys.add(ep.episodeKey);
+      }
+    }
 
     await tx
       .update(priorities)
@@ -236,10 +321,16 @@ export async function persistInsightsResult(args: {
         patternId: pattern.id,
         priorityId: priority.id,
         conversationId: args.conversationId,
+        phenomenonKey,
         patternMaturity,
         patternStatus,
         occurrenceCount: patternMaturity,
-        occurrences: occurrenceEpisodes,
+        occurrences: mergedEpisodes.map((e) => ({
+          episode: e.episode,
+          whyDistinct: e.whyDistinct,
+          episodeKey: e.episodeKey,
+        })),
+        newOccurrences: incomingEpisodes,
         supportingConversationIds,
       },
     });
@@ -258,7 +349,11 @@ export async function persistInsightsResult(args: {
       priorityId: priority.id,
       patternMaturity,
       patternStatus,
-      report: presentedReport,
+      phenomenonKey,
+      report: {
+        ...presentedReport,
+        phenomenonKey: phenomenonKey || presentedReport.phenomenonKey,
+      },
     };
   });
 }

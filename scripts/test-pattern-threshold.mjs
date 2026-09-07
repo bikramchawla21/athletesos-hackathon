@@ -167,6 +167,57 @@ describe("pattern threshold — distinct real-world occurrences", () => {
     assert.doesNotMatch(presented.pattern.explanation, /\byou tend to\b/i);
   });
 
+  it("7: workspace ledger + new episode accumulates to pattern threshold", () => {
+    const report = {
+      ...sampleReport,
+      phenomenonKey: "protective_when_ahead",
+      distinctOccurrences: [
+        {
+          episode: "Tonight’s league match — tightened when up a break",
+          whyDistinct: "New competition episode, distinct from prior practices.",
+        },
+      ],
+    };
+    const prior = [
+      {
+        episode: "Monday practice lead collapse",
+        episodeKey: "monday_practice_lead_collapse",
+        whyDistinct: "Practice episode earlier in the week.",
+      },
+      {
+        episode: "Wednesday practice — tentative with a lead",
+        episodeKey: "wednesday_practice_tentative_with_a_lead",
+        whyDistinct: "Separate mid-week practice.",
+      },
+    ];
+    const n = resolveOccurrenceMaturity({ report, priorOccurrences: prior });
+    assert.equal(n, 3);
+    assert.equal(resolvePatternPersistStatus(n), "emerging");
+  });
+
+  it("8: same episode restated across sessions does not double-count via ledger", () => {
+    const report = {
+      ...sampleReport,
+      phenomenonKey: "protective_when_ahead",
+      distinctOccurrences: [
+        {
+          episode: "Sunday final vs Jordan",
+          whyDistinct: "Same match discussed again later.",
+        },
+      ],
+    };
+    const prior = [
+      {
+        episode: "Sunday final vs Jordan",
+        episodeKey: "sunday_final_vs_jordan",
+        whyDistinct: "Original mention of that final.",
+      },
+    ];
+    const n = resolveOccurrenceMaturity({ report, priorOccurrences: prior });
+    assert.equal(n, 1);
+    assert.equal(resolvePatternPersistStatus(n), "proposed");
+  });
+
   it("athlete-facing synthesis cannot use longitudinal language below threshold", () => {
     const presented = presentReportForPatternMaturity(sampleReport, 1);
     assert.match(presented.pattern.explanation, /observation|today/i);
@@ -188,17 +239,25 @@ describe("pattern threshold wiring", () => {
       "utf8",
     );
     const insights = readFileSync(join(__dirname, "../lib/insights.mjs"), "utf8");
+    const reset = readFileSync(
+      join(__dirname, "../server/services/workspace-reset-service.ts"),
+      "utf8",
+    );
     assert.match(persist, /resolveOccurrenceMaturity/);
     assert.match(persist, /resolvePatternPersistStatus/);
     assert.match(persist, /presentReportForPatternMaturity/);
     assert.match(persist, /occurrenceCount/);
+    assert.match(persist, /occurrenceLedger/);
+    assert.match(persist, /priorOccurrences/);
     assert.doesNotMatch(persist, /resolveSessionPatternMaturity/);
     assert.match(memory, /\["emerging", "revised"\]/);
     assert.doesNotMatch(memory, /PATTERN_MIN_DISTINCT_CONVERSATIONS/);
     assert.doesNotMatch(memory, /distinctConversations/);
     assert.doesNotMatch(memory, /inArray\(patterns\.status, \["emerging", "supported"/);
     assert.match(insights, /distinctOccurrences/);
+    assert.match(insights, /phenomenonKey/);
     assert.match(insights, /distinct real-world/);
     assert.doesNotMatch(insights, /three distinct discovery sessions/i);
+    assert.match(reset, /occurrenceLedger/);
   });
 });

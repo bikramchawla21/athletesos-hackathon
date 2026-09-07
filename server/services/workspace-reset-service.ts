@@ -10,6 +10,7 @@ import {
   modelOperations,
   notifications,
   observations,
+  occurrenceLedger,
   patternEvidence,
   patternFeedback,
   patterns,
@@ -97,6 +98,10 @@ export async function resetAthleteWorkspace(args: {
     await tx
       .delete(workspaceInvitations)
       .where(eq(workspaceInvitations.workspaceId, workspaceId));
+    // Ledger references patterns/reflections — delete before those rows.
+    await tx
+      .delete(occurrenceLedger)
+      .where(eq(occurrenceLedger.workspaceId, workspaceId));
     await tx.delete(reflections).where(eq(reflections.workspaceId, workspaceId));
     await tx.delete(priorities).where(eq(priorities.workspaceId, workspaceId));
     await tx.delete(patterns).where(eq(patterns.workspaceId, workspaceId));

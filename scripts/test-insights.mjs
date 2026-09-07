@@ -119,6 +119,14 @@ const correctionAwareReport = {
     "Keep practice free and transfer that freedom into the next point after setbacks.",
   ],
   closing: "We’ll keep learning together, and if the patterns change, our priorities will change too.",
+  phenomenonKey: "emotional_recovery_after_momentum_shifts",
+  distinctOccurrences: [
+    {
+      episode: "Today’s conversation about momentum swings and between-point recovery",
+      whyDistinct:
+        "Single session reflection spanning related moments from the same ongoing theme — one occurrence until separate real-world episodes are named.",
+    },
+  ],
 };
 
 describe("insights context gate", () => {
@@ -205,6 +213,7 @@ describe("insight prompt safeguards", () => {
     assert.match(INSIGHT_INSTRUCTIONS, /Never invent coach feedback/i);
     assert.match(INSIGHT_INSTRUCTIONS, /corrections?/i);
     assert.match(INSIGHT_INSTRUCTIONS, /distinctOccurrences/i);
+    assert.match(INSIGHT_INSTRUCTIONS, /phenomenonKey/i);
     assert.match(INSIGHT_INSTRUCTIONS, /distinct real-world/i);
     assert.doesNotMatch(INSIGHT_INSTRUCTIONS, /three distinct discovery sessions/i);
     assert.match(INSIGHT_INSTRUCTIONS, /Do not diagnose/i);
@@ -214,6 +223,7 @@ describe("insight prompt safeguards", () => {
     const routePath = join(__dirname, "../app/api/insights/route.ts");
     const source = readFileSync(routePath, "utf8");
     assert.match(source, /generateInsights/);
+    assert.match(source, /occurrenceLedgerContext/);
     assert.match(source, /parseInsightsRequest/);
   });
 });

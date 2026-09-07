@@ -151,7 +151,10 @@ async function handleWorkspaceInsights(json: unknown) {
     status: "started",
   });
 
-  const result = await generateInsights(ctx.messages, { memory: ctx.memory });
+  const result = await generateInsights(ctx.messages, {
+    memory: ctx.memory,
+    occurrenceLedgerContext: ctx.occurrenceLedgerContext,
+  });
 
   if (result.status >= 400 || !result.body?.report) {
     await recordModelOperation({

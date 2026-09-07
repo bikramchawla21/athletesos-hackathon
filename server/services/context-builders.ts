@@ -1,7 +1,9 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { messages, modelOperations, priorities, patterns, focusAreas } from "@/db/schema";
+import { formatOccurrenceLedgerForInsights } from "@/lib/occurrence-ledger.mjs";
 import { loadAthleteMemory } from "./memory-service";
+import { loadOccurrenceLedger } from "./insights-persist-service";
 import type { AthleteMemory, Message, ReflectionReport } from "@/lib/types";
 
 const MAX_DISCOVERY_MESSAGES = 40;
@@ -101,6 +103,7 @@ export async function buildInsightsContext(
 ): Promise<{
   messages: Message[];
   memory: AthleteMemory;
+  occurrenceLedgerContext: string;
   entityIds: Record<string, unknown>;
 }> {
   const db = getDb();
@@ -113,13 +116,17 @@ export async function buildInsightsContext(
 
   const ordered = [...rows].reverse();
   const memory = await loadAthleteMemory(workspaceId);
+  const ledgerRows = await loadOccurrenceLedger(workspaceId);
+  const occurrenceLedgerContext = formatOccurrenceLedgerForInsights(ledgerRows);
   return {
     messages: toDomainMessages(ordered),
     memory,
+    occurrenceLedgerContext,
     entityIds: {
       conversationId,
       messageIds: ordered.map((m) => m.id),
       memorySnapshot: true,
+      occurrenceLedgerKeys: [...new Set(ledgerRows.map((r) => r.phenomenonKey))],
     },
   };
 }

@@ -33,8 +33,15 @@ export type ReflectionReport = {
   focusAreas: string[];
   closing: string;
   /**
-   * Explicit distinct real-world occurrences of the same/similar phenomenon.
-   * Required for athlete-facing pattern eligibility (>=3). Missing/empty = ambiguous → no pattern.
+   * Stable snake_case key for the underlying phenomenon across sessions.
+   * Used to accumulate episodes in the workspace occurrence ledger.
+   */
+  phenomenonKey?: string;
+  /**
+   * Explicit distinct real-world occurrences of the same/similar phenomenon
+   * evidenced in this transcript (plus clearly restated distinct historical episodes).
+   * Athlete-facing pattern eligibility uses ledger + these episodes (>=3 total).
+   * Missing/empty with empty ledger = ambiguous → no pattern.
    */
   distinctOccurrences?: DistinctOccurrence[];
 };

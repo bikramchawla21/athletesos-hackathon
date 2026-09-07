@@ -370,6 +370,39 @@ export const patterns = pgTable(
   (table) => [index("patterns_workspace_idx").on(table.workspaceId)],
 );
 
+/**
+ * Workspace-level ledger of distinct real-world occurrences per phenomenon.
+ * Pattern eligibility (>=3) is gated on this ledger, not per-session report length alone.
+ */
+export const occurrenceLedger = pgTable(
+  "occurrence_ledger",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => athleteWorkspaces.id),
+    phenomenonKey: text("phenomenon_key").notNull(),
+    episode: text("episode").notNull(),
+    episodeKey: text("episode_key").notNull(),
+    whyDistinct: text("why_distinct").notNull(),
+    conversationId: uuid("conversation_id").references(() => conversations.id),
+    patternId: uuid("pattern_id").references(() => patterns.id),
+    reflectionId: uuid("reflection_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("occurrence_ledger_workspace_phenomenon_episode_uidx").on(
+      table.workspaceId,
+      table.phenomenonKey,
+      table.episodeKey,
+    ),
+    index("occurrence_ledger_workspace_phenomenon_idx").on(
+      table.workspaceId,
+      table.phenomenonKey,
+    ),
+  ],
+);
+
 export const patternEvidence = pgTable(
   "pattern_evidence",
   {
