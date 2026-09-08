@@ -1,0 +1,204 @@
+:root {
+  --bg: #f4efe6;
+  --ink: #2b241c;
+  --muted: #7a6f63;
+  --card: rgba(255, 252, 247, 0.82);
+  --line: rgba(43, 36, 28, 0.08);
+  --accent: #c45c26;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 700px at 50% -10%, #fff8ef, transparent 55%),
+    var(--bg);
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Times New Roman", serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; }
+
+.shell {
+  min-height: 100dvh;
+  padding: calc(24px + var(--safe-top)) 24px calc(28px + var(--safe-bottom));
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.nav {
+  display: flex;
+  gap: 18px;
+  font-size: 0.92rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  margin-bottom: 48px;
+}
+.nav a[aria-current="page"] { color: var(--ink); }
+
+.home {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 70dvh;
+  text-align: center;
+  gap: 10px;
+}
+
+.whatsup {
+  font-size: clamp(2.4rem, 9vw, 3.4rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+.aur {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.35rem;
+  font-weight: 400;
+}
+
+.mic {
+  margin-top: 48px;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--ink);
+  color: #f7f1e8;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  cursor: pointer;
+}
+.mic[data-on="true"] {
+  background: var(--accent);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.mic:disabled { opacity: 0.5; cursor: wait; }
+
+.timer {
+  margin: 8px 0 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.35rem;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.captions {
+  margin: 8px 0 0;
+  max-width: 34ch;
+  color: var(--ink);
+  font-size: 1.05rem;
+  line-height: 1.4;
+}
+
+@keyframes pulse {
+  50% { transform: scale(1.04); }
+}
+
+.status {
+  min-height: 1.4em;
+  color: var(--muted);
+  font-size: 1rem;
+  margin-top: 18px;
+}
+
+.reply {
+  margin-top: 28px;
+  max-width: 34ch;
+  line-height: 1.45;
+  font-size: 1.15rem;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 20px 20px 18px;
+  margin-bottom: 14px;
+}
+
+h1 { font-size: 1.7rem; font-weight: 500; letter-spacing: -0.02em; margin: 0 0 8px; }
+h2 { font-size: 1.05rem; font-weight: 500; margin: 0 0 10px; }
+p { line-height: 1.5; }
+
+.step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.step button {
+  font: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.step button[data-on="true"] { color: var(--ink); border-color: var(--ink); }
+
+.kind-group { margin-top: 12px; }
+.kind-label {
+  margin: 12px 0 0;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+.share-card {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  border-radius: 24px;
+  padding: 36px 28px;
+  background: linear-gradient(180deg, #2b241c, #4a3224);
+  color: #f7f1e8;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.share-card h1 { color: #f7f1e8; font-size: 2.2rem; }
+.share-card .muted { color: rgba(247, 241, 232, 0.7); }
+
+input, textarea {
+  width: 100%;
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.quiet { color: var(--muted); font-size: 0.95rem; }
+
+.bullets {
+  margin: 8px 0 0;
+  padding-left: 1.15em;
+  line-height: 1.45;
+}
+.bullets li { margin: 0.35em 0; }
+
+footer.tiny {
+  margin-top: 40px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
