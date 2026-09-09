@@ -44,3 +44,6 @@ yarn-error.log*
 scripts/stress-longitudinal/out/
 scripts/stress-longitudinal/out-*/
 .env.stress-longitudinal.local
+
+# Sayana lives in its own repo: https://github.com/bikramchawla21/sayana
+/sayana/
