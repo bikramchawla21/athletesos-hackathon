@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Nav } from "@/components/Nav";
 import { BulletList } from "@/components/BulletList";
-import { KIND_LABEL, MEMORY_KINDS } from "@/domain/memory-kinds";
+import { KIND_PILL } from "@/domain/memory-kinds";
 import type { MemoryKind } from "@/domain/types";
 
 type BriefingItem = {
@@ -19,21 +19,27 @@ type Today = {
   day: string;
   summary: string;
   dumpCount: number;
-  totalWordCount: number;
-  totalCurseCount: number;
-  curseCounts: Record<string, number>;
-  topWords: { word: string; count: number }[];
   steps: Array<{ id: string; title: string; status: string; dueHint: string | null }>;
   briefing: BriefingItem[];
+  briefingTotal: number;
 };
 
 export default function TodayPage() {
   const [data, setData] = useState<Today | null>(null);
+  const [doneNote, setDoneNote] = useState(false);
+  const queueSize = useRef(0);
 
   async function load() {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const res = await fetch(`/api/v1/today?tz=${encodeURIComponent(tz)}`);
-    setData((await res.json()) as Today);
+    const next = (await res.json()) as Today;
+    if (next.briefing?.length) {
+      if (!queueSize.current) queueSize.current = next.briefing.length;
+    } else {
+      queueSize.current = 0;
+      setDoneNote(false);
+    }
+    setData(next);
   }
 
   useEffect(() => {
@@ -55,62 +61,57 @@ export default function TodayPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     });
-    await load();
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const res = await fetch(`/api/v1/today?tz=${encodeURIComponent(tz)}`);
+    const next = (await res.json()) as Today;
+    if (!next.briefing?.length) {
+      queueSize.current = 0;
+      setDoneNote(true);
+    }
+    setData(next);
   }
 
-  const briefing = data?.briefing || [];
+  const card = data?.briefing?.[0];
+  const remaining = data?.briefing?.length || 0;
+  const total = queueSize.current || remaining;
+  const pos = Math.max(1, total - remaining + 1);
+  const showBriefing = Boolean(card);
 
   return (
     <main className="shell">
       <Nav current="today" />
       <h1>Today</h1>
-      <p className="quiet">One summary. One list. Even if you dumped more than once.</p>
       {!data ? (
         <p className="quiet">loading…</p>
+      ) : showBriefing && card ? (
+        <section className="card briefing-card">
+          <p className="quiet">
+            Briefing · {pos} of {total}
+          </p>
+          <span className="pill">{KIND_PILL[card.kind as MemoryKind] || card.kind}</span>
+          <p className="briefing-line">{card.title}</p>
+          {card.dueHint ? <p className="quiet">{card.dueHint}</p> : null}
+          <div className="briefing-actions">
+            <button type="button" className="mic briefing-btn" onClick={() => setBriefing(card.id, "approved")}>
+              approve
+            </button>
+            <button type="button" className="ghost-btn" onClick={() => setBriefing(card.id, "ignored")}>
+              ignore
+            </button>
+          </div>
+        </section>
       ) : (
         <>
-          {briefing.length > 0 ? (
-            <section className="card">
-              <h2>Morning briefing</h2>
-              <p className="quiet">
-                Approve to keep it in memory. Ignore to let it go. The list below does not change.
-              </p>
-              {MEMORY_KINDS.map((kind) => {
-                const items = briefing.filter((item) => item.kind === kind);
-                if (!items.length) return null;
-                return (
-                  <div className="kind-group" key={kind}>
-                    <h3 className="kind-label">{KIND_LABEL[kind as MemoryKind]}</h3>
-                    {items.map((item) => (
-                      <div className="step" key={item.id}>
-                        <div style={{ flex: 1 }}>
-                          <div>{item.title}</div>
-                          {item.dueHint ? <div className="quiet">{item.dueHint}</div> : null}
-                        </div>
-                        <button type="button" onClick={() => setBriefing(item.id, "approved")}>
-                          approve
-                        </button>
-                        <button type="button" onClick={() => setBriefing(item.id, "ignored")}>
-                          ignore
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </section>
-          ) : null}
+          {doneNote ? <p className="quiet">That’s the lot.</p> : null}
           <section className="card">
             <h2>What you said</h2>
             <BulletList text={data.summary} empty="Nothing stored for this day yet. Whatsup?" />
-            <p className="quiet">
-              {data.dumpCount} dump{data.dumpCount === 1 ? "" : "s"}
-            </p>
+            <p className="quiet">{data.dumpCount} dump{data.dumpCount === 1 ? "" : "s"} · full rants in History</p>
           </section>
           <section className="card">
             <h2>Next steps</h2>
             {data.steps.length === 0 ? (
-              <p className="quiet">No logistics pulled out yet.</p>
+              <p className="quiet">No work to-dos pulled out.</p>
             ) : (
               data.steps.map((s) => (
                 <div className="step" key={s.id}>
@@ -131,7 +132,7 @@ export default function TodayPage() {
               ))
             )}
             <p className="quiet" style={{ marginTop: 16 }}>
-              <a href="/api/v1/ics">Download .ics</a> — Apple/Google Calendar without mixing rants.
+              <a href="/api/v1/ics">Download .ics</a>
             </p>
           </section>
         </>

@@ -171,5 +171,6 @@ export async function ensureSchema() {
     )
   `;
   await db`CREATE INDEX IF NOT EXISTS sayana_memory_person_status_idx ON sayana_memory_items (person_id, briefing_status, local_day)`;
+  await db`ALTER TABLE sayana_sessions ADD COLUMN IF NOT EXISTS dump_lane text`;
   ensured = true;
 }

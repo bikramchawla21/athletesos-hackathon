@@ -16,6 +16,22 @@ export const KIND_LABEL: Record<MemoryKind, string> = {
   question: "Questions",
 };
 
+export const KIND_PILL: Record<MemoryKind, string> = {
+  commitment: "Commitment",
+  decision: "Decision",
+  idea: "Idea",
+  person: "Person",
+  question: "Question",
+};
+
+export const BRIEFING_KIND_ORDER: MemoryKind[] = [
+  "commitment",
+  "decision",
+  "question",
+  "idea",
+  "person",
+];
+
 export type MemoryDraft = {
   kind: MemoryKind;
   title: string;
@@ -33,8 +49,9 @@ function cleanKind(item: ExtractedKind): ExtractedKind | null {
   };
 }
 
-/** Extra briefing rows. Steps/people/loops still persist on their own tables. */
+/** Extra briefing rows. Life dumps do not enter the briefing queue. */
 export function memoryDraftsFromExtract(extract: DumpExtract): MemoryDraft[] {
+  if (extract.lane === "life") return [];
   const out: MemoryDraft[] = [];
   const seen = new Set<string>();
 

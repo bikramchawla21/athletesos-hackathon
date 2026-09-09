@@ -3,6 +3,7 @@ import { requirePerson } from "@/server/auth";
 import { getSql } from "@/db/client";
 import { mergeStats } from "@/domain/curse-count";
 import { topWords } from "@/domain/tokenize";
+import { bulletsFromText, mergeBulletLists, takeFive, bulletsToSummary } from "@/domain/step-identity";
 import type { CurseCounts, SessionStats } from "@/domain/types";
 
 export async function GET(request: Request) {
@@ -17,8 +18,16 @@ export async function GET(request: Request) {
     WHERE person_id = ${person.id} AND updated_at >= ${since}
     ORDER BY local_day DESC
   `;
+  const list = (Array.isArray(rows) ? rows : []) as Array<{
+    dump_count?: unknown;
+    total_word_count?: unknown;
+    total_curse_count?: unknown;
+    curse_counts?: unknown;
+    word_counts?: unknown;
+    summary?: unknown;
+  }>;
   const merged = mergeStats(
-    rows.map(
+    list.map(
       (r): SessionStats => ({
         totalWordCount: Number(r.total_word_count) || 0,
         totalCurseCount: Number(r.total_curse_count) || 0,
@@ -27,7 +36,10 @@ export async function GET(request: Request) {
       }),
     ),
   );
-  const dumpCount = rows.reduce((n, r) => n + Number(r.dump_count || 0), 0);
+  const dumpCount = list.reduce((n, r) => n + Number(r.dump_count || 0), 0);
+  const weekSummary = bulletsToSummary(
+    takeFive(mergeBulletLists(list.map((r) => bulletsFromText(String(r.summary || ""))))),
+  );
   return NextResponse.json({
     range,
     dumpCount,
@@ -35,10 +47,6 @@ export async function GET(request: Request) {
     totalCurseCount: merged.totalCurseCount,
     curseCounts: merged.curseCounts,
     topWords: topWords(merged.wordCounts, 16),
-    days: rows.map((r) => ({
-      day: String(r.local_day),
-      summary: String(r.summary || ""),
-      dumps: Number(r.dump_count || 0),
-    })),
+    summary: weekSummary,
   });
 }

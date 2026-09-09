@@ -3,7 +3,7 @@ import { countSpeech, mergeStats } from "@/domain/curse-count";
 import { decideMode } from "@/domain/mode";
 import { hourInZone, localDayKey, timeHintFromHour } from "@/domain/time-hint";
 import { topWords } from "@/domain/tokenize";
-import { preferStepTitle, stepIdentity, bulletsFromText, bulletsToSummary, mergeBulletLists } from "@/domain/step-identity";
+import { preferStepTitle, stepIdentity, bulletsFromText, bulletsToSummary, mergeBulletLists, takeFive } from "@/domain/step-identity";
 import { memoryDraftsFromExtract } from "@/domain/memory-kinds";
 import { getSql } from "@/db/client";
 import { persistAudioBlob } from "@/server/audio-vault";
@@ -40,11 +40,11 @@ export async function processDump(opts: {
 
   await db`
     INSERT INTO sayana_sessions (
-      id, person_id, mode, why, overwhelmed, time_hint, language_mix,
+      id, person_id, mode, why, overwhelmed, time_hint, language_mix, dump_lane,
       summary, transcript, recorded_at, time_zone, local_day
     ) VALUES (
       ${sessionId}, ${opts.personId}, ${mode.mode}, ${mode.why}, ${overwhelmed},
-      ${timeHintFromHour(hour)}, ${extract.languageMix}, ${extract.summary}, ${transcript},
+      ${timeHintFromHour(hour)}, ${extract.languageMix}, ${extract.lane}, ${extract.summary}, ${transcript},
       ${recordedAt.toISOString()}, ${opts.timeZone}, ${day}
     )
   `;
@@ -86,7 +86,8 @@ export async function processDump(opts: {
     byKey.set(stepIdentity(String(row.title)), { id: String(row.id), title: String(row.title) });
   }
 
-  for (const step of extract.steps) {
+  if (extract.lane !== "life") {
+    for (const step of extract.steps.slice(0, 5)) {
     const title = step.title.trim();
     if (!title) continue;
     const key = stepIdentity(title);
@@ -108,6 +109,7 @@ export async function processDump(opts: {
       VALUES (${id}, ${opts.personId}, ${sessionId}, ${day}, ${title}, ${step.dueHint ?? null}, ${step.personName ?? null}, 'proposed')
     `;
     byKey.set(key, { id, title });
+    }
   }
 
   for (const person of extract.people) {
@@ -169,7 +171,7 @@ export async function processDump(opts: {
     INSERT INTO sayana_reminders (id, person_id, local_day, body, fire_at)
     VALUES (
       ${randomUUID()}, ${opts.personId}, ${day},
-      ${"Sayana — a few things still waiting from today."},
+      ${"Sayana — your briefing is still waiting. Approve or ignore."},
       ${fireAt.toISOString()}
     )
   `;
@@ -214,7 +216,7 @@ export async function rebuildDay(personId: string, day: string) {
     })),
   );
   const summary = bulletsToSummary(
-    mergeBulletLists(sessionList.map((s) => bulletsFromText(String(s.summary || "")))),
+    takeFive(mergeBulletLists(sessionList.map((s) => bulletsFromText(String((s as { summary?: unknown }).summary || ""))))),
   );
   await db`
     INSERT INTO sayana_day_rollups (

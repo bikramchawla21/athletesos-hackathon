@@ -3,7 +3,9 @@ import { requirePerson } from "@/server/auth";
 import { getSql } from "@/db/client";
 import { localDayKey } from "@/domain/time-hint";
 import { topWords } from "@/domain/tokenize";
-import type { CurseCounts } from "@/domain/types";
+import { takeFive, bulletsFromText } from "@/domain/step-identity";
+import { BRIEFING_KIND_ORDER } from "@/domain/memory-kinds";
+import type { CurseCounts, MemoryKind } from "@/domain/types";
 
 export async function GET(request: Request) {
   const person = await requirePerson();
@@ -11,6 +13,14 @@ export async function GET(request: Request) {
   const timeZone = url.searchParams.get("tz") || "UTC";
   const day = url.searchParams.get("day") || localDayKey(new Date(), timeZone);
   const db = getSql();
+
+  await db`
+    UPDATE sayana_memory_items
+    SET briefing_status = 'ignored', updated_at = now()
+    WHERE person_id = ${person.id}
+      AND briefing_status = 'pending'
+      AND created_at < now() - interval '12 hours'
+  `;
 
   const rollup = await db`
     SELECT summary, dump_count, total_word_count, total_curse_count, curse_counts, word_counts
@@ -22,13 +32,14 @@ export async function GET(request: Request) {
     SELECT id, title, status, due_hint, person_name
     FROM sayana_next_steps
     WHERE person_id = ${person.id} AND local_day = ${day}
+      AND status <> 'dropped'
     ORDER BY created_at ASC
   `;
   const briefingRows = await db`
-    SELECT id, kind, title, due_hint, person_name, local_day
+    SELECT id, kind, title, due_hint, person_name, local_day, created_at
     FROM sayana_memory_items
     WHERE person_id = ${person.id} AND briefing_status = 'pending'
-    ORDER BY local_day DESC, created_at ASC
+    ORDER BY created_at ASC
   `;
   const r = (Array.isArray(rollup) ? rollup[0] : undefined) as
     | {
@@ -57,24 +68,31 @@ export async function GET(request: Request) {
     person_name: unknown;
     local_day: unknown;
   }>;
+  const kindRank = (kind: string) => {
+    const i = BRIEFING_KIND_ORDER.indexOf(kind as MemoryKind);
+    return i < 0 ? 99 : i;
+  };
+  const queued = [...briefingList]
+    .sort((a, b) => kindRank(String(a.kind)) - kindRank(String(b.kind)))
+    .slice(0, 5);
 
   return NextResponse.json({
     day,
     personId: person.id,
-    summary: r?.summary || "",
+    summary: takeFive(bulletsFromText(String(r?.summary || ""))).join("\n"),
     dumpCount: Number(r?.dump_count || 0),
     totalWordCount: Number(r?.total_word_count || 0),
     totalCurseCount: Number(r?.total_curse_count || 0),
     curseCounts,
     topWords: topWords(wordCounts, 12),
-    steps: stepRows.map((s) => ({
+    steps: stepRows.slice(0, 5).map((s) => ({
       id: String(s.id),
       title: String(s.title),
       status: String(s.status),
       dueHint: s.due_hint ? String(s.due_hint) : null,
       personName: s.person_name ? String(s.person_name) : null,
     })),
-    briefing: briefingList.map((item) => ({
+    briefing: queued.map((item) => ({
       id: String(item.id),
       kind: String(item.kind),
       title: String(item.title),
@@ -82,5 +100,6 @@ export async function GET(request: Request) {
       personName: item.person_name ? String(item.person_name) : null,
       day: String(item.local_day),
     })),
+    briefingTotal: queued.length,
   });
 }

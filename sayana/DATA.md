@@ -5,7 +5,7 @@ All tables are prefixed `sayana_`. Every row except lookup-free events is scoped
 | Table | Point of the row |
 | --- | --- |
 | sayana_people | Our UUID. Clerk id or device cookie is a login, not the moat. |
-| sayana_sessions | One dump. Transcript, summary, mode, local day, timezone. |
+| sayana_sessions | One dump. Transcript, English summary, dump_lane (life/work), local day, timezone. |
 | sayana_audio_assets | Audio metadata. `storage_key` like `vault:{id}` when bytes are kept. |
 | sayana_audio_blobs | Raw rant bytes (base64) for a later replay board. No replay UI yet. |
 | sayana_session_stats | Word histogram, per-type curse map, totalCurseCount = sum. |

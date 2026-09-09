@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { z } from "zod";
 import { COMPANION_SYSTEM, EXTRACT_SYSTEM } from "@/domain/prompts";
-import { bulletsFromText, bulletsToSummary } from "@/domain/step-identity";
+import { bulletsFromText, bulletsToSummary, takeFive } from "@/domain/step-identity";
 import type { DumpExtract, LanguageMix } from "@/domain/types";
 
 const kindItem = z.object({
@@ -14,6 +14,7 @@ const extractSchema = z.object({
   summary: z.string().optional(),
   summaryBullets: z.array(z.string()).optional(),
   languageMix: z.enum(["en", "hi", "hinglish"]),
+  lane: z.enum(["life", "work"]).optional().default("work"),
   overwhelmed: z.boolean(),
   steps: z.array(
     z.object({
@@ -75,8 +76,9 @@ export async function extractDump(transcript: string): Promise<DumpExtract> {
   const openai = client();
   const fallback: DumpExtract = {
     summary: transcript.slice(0, 400) || "I dumped a bit.",
-    summaryBullets: transcript ? [`I said: ${transcript.slice(0, 180)}`] : [],
+    summaryBullets: transcript ? takeFive([`I said: ${transcript.slice(0, 180)}`]) : [],
     languageMix: guessMix(transcript),
+    lane: "work",
     overwhelmed: false,
     steps: [],
     people: [],
@@ -104,12 +106,13 @@ export async function extractDump(transcript: string): Promise<DumpExtract> {
         : bulletsFromText(parsed.summary || "");
     return {
       ...parsed,
+      lane: parsed.lane ?? "work",
       commitments: parsed.commitments ?? [],
       decisions: parsed.decisions ?? [],
       ideas: parsed.ideas ?? [],
       questions: parsed.questions ?? [],
-      summaryBullets: bullets,
-      summary: bulletsToSummary(bullets) || parsed.summary || fallback.summary,
+      summaryBullets: takeFive(bullets),
+      summary: bulletsToSummary(takeFive(bullets)) || parsed.summary || fallback.summary,
     };
   } catch {
     return fallback;

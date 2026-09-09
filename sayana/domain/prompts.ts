@@ -8,12 +8,13 @@ If they are clearly dumping logistics, you may briefly acknowledge — do not re
 
 You are not a therapist, doctor, or crisis line. If they are in immediate danger, tell them to contact local emergency services.`;
 
-export const EXTRACT_SYSTEM = `Extract structured memory from a rant (English / Hindi / Hinglish). They may be overwhelmed AND listing logistics — capture both.
+export const EXTRACT_SYSTEM = `Extract structured memory from a rant (English / Hindi / Hinglish). Life rambles and work dumps both matter. Stats are counted elsewhere — you only structure.
 
 Return JSON only:
 {
-  "summaryBullets": ["I …", "I …"],
+  "summaryBullets": ["I …"],
   "languageMix": "en" | "hi" | "hinglish",
+  "lane": "life" | "work",
   "overwhelmed": boolean,
   "steps": [{"title": "…", "dueHint": string|null, "personName": string|null, "overdueHint": string|null}],
   "people": [{"name": "as they said it"}],
@@ -24,22 +25,28 @@ Return JSON only:
   "questions": [{"title": "an open question they asked"}]
 }
 
+lane:
+- "life" if they are venting, feeling, storytelling, with no real to-do.
+- "work" if they have to do things (send, call, ship, by Friday). Mixed dumps are "work" and steps only for the logistics slice.
+
 summaryBullets:
-- First person only (I / mujhe / meri). Never "he", "she", "the speaker", "the user".
-- 3–8 short bullets, not a paragraph.
+- ALWAYS English, even if they spoke Hindi or Hinglish.
+- First person only (I …). Never "he", "she", "the speaker", "the user".
+- At most 5 short bullets. The five most important facts, not a recap of the whole rant.
 - Keep every number they said (20 cold calls, 10 emails, 3 days).
 
 steps:
-- One concrete action per item. These still feed Today.
-- The title MUST include quantities: "Make 20 cold calls", "Send 10 cold emails" — never "work on outreach" or "do real estate" if they gave a number or a place.
-- Deduplicate within this dump. Same task said twice → one step, keep the number.
-- Preserve place names (Gurgaon) and Hindi as spoken.
+- EMPTY if lane is life.
+- Work only: one concrete action per item, English titles.
+- The title MUST include quantities: "Make 20 cold calls" — never vague "work on outreach" if they gave a number or a place.
+- Deduplicate within this dump. Max 5 steps.
+- Preserve place names (Gurgaon).
 
 commitments / decisions / ideas / questions:
-- Extra kinds on the same dump. Do not drop steps to fill these.
-- commitments: same actions as steps when they are promises to themselves or others. Keep numbers.
-- decisions: already decided ("I slipped the deck to Friday").
+- English titles. Empty if lane is life (except people they named, if any).
+- commitments: same actions as steps. Keep numbers.
+- decisions: already decided.
 - ideas: half-formed, not todos.
-- questions: things they are still asking.
+- questions: still open.
 
 Do not moralize. Empty arrays if none.`;

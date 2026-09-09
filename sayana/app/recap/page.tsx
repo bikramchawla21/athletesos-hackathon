@@ -11,7 +11,7 @@ type Recap = {
   totalCurseCount: number;
   curseCounts: Record<string, number>;
   topWords: { word: string; count: number }[];
-  days: { day: string; summary: string; dumps: number }[];
+  summary: string;
 };
 
 export default function RecapPage() {
@@ -119,46 +119,12 @@ export default function RecapPage() {
             ))}
           </section>
           <section className="card">
-            <h2>Days</h2>
-            {data.days.map((d) => (
-              <div key={d.day} style={{ marginBottom: 16 }}>
-                <strong>{d.day}</strong>
-                <BulletList text={d.summary} empty={`${d.dumps} dumps`} />
-              </div>
-            ))}
+            <h2>What mattered</h2>
+            <BulletList text={data.summary} empty="Nothing stored this span yet." />
+            <p className="quiet">Full rants live in History.</p>
           </section>
-          <AskBox />
         </>
       )}
     </main>
-  );
-}
-
-function AskBox() {
-  const [q, setQ] = useState("");
-  const [out, setOut] = useState("");
-  return (
-    <section className="card">
-      <h2>Last Tuesday?</h2>
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="mom, emails, 2026-09-08…" />
-      <p>
-        <button
-          type="button"
-          className="mic"
-          style={{ width: "auto", height: "auto", padding: "8px 16px" }}
-          onClick={async () => {
-            const res = await fetch("/api/v1/ask", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ q }),
-            });
-            setOut(JSON.stringify(await res.json(), null, 2));
-          }}
-        >
-          ask
-        </button>
-      </p>
-      {out ? <pre className="quiet" style={{ whiteSpace: "pre-wrap" }}>{out}</pre> : null}
-    </section>
   );
 }

@@ -80,3 +80,7 @@ export function mergeBulletLists(lists: string[][]): string[] {
 export function bulletsToSummary(bullets: string[]): string {
   return bullets.join("\n");
 }
+
+export function takeFive(bullets: string[]): string[] {
+  return mergeBulletLists([bullets]).slice(0, 5);
+}

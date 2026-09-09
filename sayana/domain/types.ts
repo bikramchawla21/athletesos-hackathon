@@ -29,6 +29,7 @@ export type ExtractedLoop = {
   personName?: string | null;
 };
 
+export type DumpLane = "life" | "work";
 export type MemoryKind = "commitment" | "decision" | "idea" | "person" | "question";
 export type BriefingStatus = "pending" | "approved" | "ignored";
 
@@ -42,6 +43,7 @@ export type DumpExtract = {
   summary: string;
   summaryBullets: string[];
   languageMix: LanguageMix;
+  lane: DumpLane;
   overwhelmed: boolean;
   steps: ExtractedStep[];
   people: ExtractedPerson[];

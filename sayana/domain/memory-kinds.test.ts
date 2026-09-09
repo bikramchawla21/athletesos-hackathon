@@ -8,6 +8,7 @@ function base(): DumpExtract {
     summary: "I dumped.",
     summaryBullets: ["I dumped."],
     languageMix: "en",
+    lane: "work",
     overwhelmed: false,
     steps: [{ title: "Make 20 cold calls" }],
     people: [{ name: "Priya" }],
@@ -37,5 +38,11 @@ describe("memoryDraftsFromExtract", () => {
     extract.commitments = [{ title: "Make 20 cold calls" }];
     const drafts = memoryDraftsFromExtract(extract);
     assert.equal(drafts.filter((d) => d.kind === "commitment").length, 1);
+  });
+
+  it("skips briefing drafts for a life ramble", () => {
+    const extract = base();
+    extract.lane = "life";
+    assert.equal(memoryDraftsFromExtract(extract).length, 0);
   });
 });
