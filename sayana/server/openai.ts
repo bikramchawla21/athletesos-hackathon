@@ -1,7 +1,8 @@
 import OpenAI from "openai";
 import { z } from "zod";
-import { COMPANION_SYSTEM, EXTRACT_SYSTEM } from "@/domain/prompts";
+import { COMPANION_SYSTEM, EXTRACT_SYSTEM, ENGLISH_REWRITE_SYSTEM } from "@/domain/prompts";
 import { bulletsFromText, bulletsToSummary, takeFive } from "@/domain/step-identity";
+import { hasArabicScript } from "@/domain/script";
 import type { DumpExtract, LanguageMix } from "@/domain/types";
 
 const kindItem = z.object({
@@ -49,7 +50,8 @@ export async function transcribeAudio(file: File): Promise<string> {
   const result = await openai.audio.transcriptions.create({
     file,
     model: "gpt-4o-mini-transcribe",
-    language: undefined,
+    prompt:
+      "Indian English, Hindi, Hinglish. Write Hindi in Devanagari or Latin letters. Do not transcribe as Urdu. Never use Arabic script.",
   });
   return result.text?.trim() ?? "";
 }
@@ -69,14 +71,30 @@ export async function companionReply(transcript: string, overwhelmed: boolean): 
     max_output_tokens: 180,
   });
   const text = out.output_text?.trim();
+  if (text && hasArabicScript(text)) {
+    const retry = await openai.responses.create({
+      model,
+      instructions: `${COMPANION_SYSTEM}\n\nYour last draft used Arabic/Urdu script. Rewrite in Hindi/Hinglish Latin or Devanagari, or English. No Arabic script.`,
+      input: transcript.slice(0, 8000),
+      max_output_tokens: 180,
+    });
+    const fixed = retry.output_text?.trim();
+    if (fixed && !hasArabicScript(fixed)) return fixed;
+    return overwhelmed ? "Main yahan hoon. Bol, I’m listening." : "I’m here. Aur Bata.";
+  }
   return text || "I’m here. Aur Bata.";
 }
 
 export async function extractDump(transcript: string): Promise<DumpExtract> {
   const openai = client();
   const fallback: DumpExtract = {
-    summary: transcript.slice(0, 400) || "I dumped a bit.",
-    summaryBullets: transcript ? takeFive([`I said: ${transcript.slice(0, 180)}`]) : [],
+    summary: hasArabicScript(transcript) ? "I dumped a bit." : transcript.slice(0, 400) || "I dumped a bit.",
+    summaryBullets:
+      transcript && !hasArabicScript(transcript)
+        ? takeFive([`I said: ${transcript.slice(0, 180)}`])
+        : transcript
+          ? ["I talked through a dump in Hindi."]
+          : [],
     languageMix: guessMix(transcript),
     lane: "work",
     overwhelmed: false,
@@ -100,20 +118,29 @@ export async function extractDump(transcript: string): Promise<DumpExtract> {
   const json = raw.replace(/^```json\n?|```$/g, "").trim();
   try {
     const parsed = extractSchema.parse(JSON.parse(json));
-    const bullets =
-      parsed.summaryBullets && parsed.summaryBullets.length
-        ? parsed.summaryBullets.map((b) => b.trim()).filter(Boolean)
-        : bulletsFromText(parsed.summary || "");
-    return {
+    let extract: DumpExtract = {
       ...parsed,
       lane: parsed.lane ?? "work",
       commitments: parsed.commitments ?? [],
       decisions: parsed.decisions ?? [],
       ideas: parsed.ideas ?? [],
       questions: parsed.questions ?? [],
-      summaryBullets: takeFive(bullets),
-      summary: bulletsToSummary(takeFive(bullets)) || parsed.summary || fallback.summary,
+      summaryBullets: takeFive(
+        parsed.summaryBullets && parsed.summaryBullets.length
+          ? parsed.summaryBullets.map((b) => b.trim()).filter(Boolean)
+          : bulletsFromText(parsed.summary || ""),
+      ),
+      summary: "",
     };
+    extract.summary = bulletsToSummary(extract.summaryBullets) || parsed.summary || fallback.summary;
+    if (hasArabicScript(JSON.stringify(extract))) {
+      extract = await rewriteExtractEnglish(openai, extract, model) ?? extract;
+    }
+    if (hasArabicScript(extract.summary) || extract.summaryBullets.some(hasArabicScript)) {
+      extract.summaryBullets = takeFive(["I talked through a dump in Hindi."]);
+      extract.summary = bulletsToSummary(extract.summaryBullets);
+    }
+    return extract;
   } catch {
     return fallback;
   }
@@ -124,5 +151,53 @@ function guessMix(text: string): LanguageMix {
   const hasLatin = /[a-zA-Z]/.test(text);
   if (hasDeva && hasLatin) return "hinglish";
   if (hasDeva) return "hi";
+  if (hasArabicScript(text)) return "hi";
   return "en";
+}
+
+async function rewriteExtractEnglish(
+  openai: OpenAI,
+  extract: DumpExtract,
+  model: string,
+): Promise<DumpExtract | null> {
+  try {
+    const out = await openai.responses.create({
+      model,
+      instructions: ENGLISH_REWRITE_SYSTEM,
+      input: JSON.stringify({
+        summaryBullets: extract.summaryBullets,
+        steps: extract.steps,
+        people: extract.people,
+        openLoops: extract.openLoops,
+        commitments: extract.commitments,
+        decisions: extract.decisions,
+        ideas: extract.ideas,
+        questions: extract.questions,
+      }),
+      max_output_tokens: 1600,
+    });
+    const raw = (out.output_text?.trim() || "").replace(/^```json\n?|```$/g, "").trim();
+    const parsed = extractSchema.partial().parse(JSON.parse(raw));
+    const bullets = takeFive(
+      (parsed.summaryBullets || extract.summaryBullets).map((b) => b.trim()).filter(Boolean),
+    );
+    return {
+      ...extract,
+      ...parsed,
+      languageMix: extract.languageMix,
+      lane: parsed.lane ?? extract.lane,
+      overwhelmed: parsed.overwhelmed ?? extract.overwhelmed,
+      summaryBullets: bullets,
+      summary: bulletsToSummary(bullets),
+      steps: parsed.steps ?? extract.steps,
+      people: parsed.people ?? extract.people,
+      openLoops: parsed.openLoops ?? extract.openLoops,
+      commitments: parsed.commitments ?? extract.commitments,
+      decisions: parsed.decisions ?? extract.decisions,
+      ideas: parsed.ideas ?? extract.ideas,
+      questions: parsed.questions ?? extract.questions,
+    };
+  } catch {
+    return null;
+  }
 }
